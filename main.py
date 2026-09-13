@@ -127,11 +127,13 @@ def upload_to_gdrive(content, today_str):
     )
     service = build("drive", "v3", credentials=creds)
 
-    filename = f"StariaPj_Daily_Report_{today_str}.md"
+    filename = f"StariaPj_Daily_Report_{today_str}"
+    
+    # 구글 문서(Google Docs) 포맷으로 변환하여 생성 (용량 제한 회피)
     file_metadata = {
         "name": filename,
         "parents": [folder_id],
-        "mimeType": "text/markdown"
+        "mimeType": "application/vnd.google-apps.document"
     }
     
     media = MediaInMemoryUpload(content.encode("utf-8"), mimetype="text/markdown")
@@ -142,3 +144,37 @@ if __name__ == "__main__":
     news_data = fetch_news()
     md_content, today_str = generate_markdown(news_data)
     upload_to_gdrive(md_content, today_str)
+2. .github/workflows/daily_news.yml 파일 경고 수정하기
+Node.js 버전 경고(Warning)를 없애기 위해 .github/workflows/daily_news.yml 파일도 버전을 v4, v5로 업데이트해 줍니다.
+name: StariaPj Daily News Automation
+
+on:
+  schedule:
+    # 매일 한국시간 아침 07:00 (UTC 22:00) 자동 실행
+    - cron: '0 22 * * *'
+  workflow_dispatch: # 수동 실행 버튼 활성화
+
+jobs:
+  run-automation:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+
+    - name: Install Dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+
+    - name: Run News Analysis & Drive Upload
+      env:
+        GDRIVE_SA_KEY: ${{ secrets.GDRIVE_SA_KEY }}
+        GDRIVE_FOLDER_ID: ${{ secrets.GDRIVE_FOLDER_ID }}
+      run: |
+        python main.py

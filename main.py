@@ -4,7 +4,6 @@ import datetime
 import feedparser
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
-from googleapiclient.http import MediaInMemoryUpload
 
 # 1. StariaPj 채널 우대 키워드 (가산점 부여)
 STARIA_KEYWORDS = [
@@ -121,23 +120,41 @@ def upload_to_gdrive(content, today_str):
         print("Google Drive Credentials or Folder ID missing!")
         return
 
+    scopes = [
+        "https://www.googleapis.com/auth/drive.file",
+        "https://www.googleapis.com/auth/documents"
+    ]
+    
     creds_dict = json.loads(sa_json)
-    creds = Credentials.from_service_account_info(
-        creds_dict, scopes=["https://www.googleapis.com/auth/drive.file"]
-    )
-    service = build("drive", "v3", credentials=creds)
+    creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
+    
+    drive_service = build("drive", "v3", credentials=creds)
+    docs_service = build("docs", "v1", credentials=creds)
 
     filename = f"StariaPj_Daily_Report_{today_str}"
     
+    # 1. 용량 0 Byte를 소비하는 빈 구글 문서 생성
     file_metadata = {
         "name": filename,
         "parents": [folder_id],
         "mimeType": "application/vnd.google-apps.document"
     }
     
-    media = MediaInMemoryUpload(content.encode("utf-8"), mimetype="text/markdown")
-    file = service.files().create(body=file_metadata, media_body=media, fields="id").execute()
-    print(f"File uploaded successfully! File ID: {file.get('id')}")
+    file = drive_service.files().create(body=file_metadata, fields="id").execute()
+    doc_id = file.get("id")
+    print(f"Created Google Doc successfully! File ID: {doc_id}")
+
+    # 2. Google Docs API로 텍스트 데이터 작성 (용량 제한 검사 우회)
+    requests = [
+        {
+            "insertText": {
+                "location": {"index": 1},
+                "text": content
+            }
+        }
+    ]
+    docs_service.documents().batchUpdate(documentId=doc_id, body={"requests": requests}).execute()
+    print("Report content updated successfully!")
 
 if __name__ == "__main__":
     news_data = fetch_news()

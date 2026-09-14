@@ -35,7 +35,7 @@ def is_banned_title(title):
     if not title:
         return True
     for kw in BANNED_TITLE_KEYWORDS:
-        if kw in title:
+        if kw.lower() in title.lower():
             return True
     return False
 
@@ -171,11 +171,15 @@ def send_email_with_pdf(pdf_bytes, time_str, recipient_email="pj2gwk@gmail.com")
     except Exception as e:
         print(f"❌ 이메일 발송 오류: {e}")
 
-def fetch_google_news_rss_realtime(query, max_hours=24):
-    """Google News RSS 최신 24시간 항목 수집 (날짜 및 블랙리스트 검증 적용)"""
+def fetch_google_news_rss_realtime(query, lang_zone="KR", max_hours=24):
+    """Google News RSS 최신 24시간 항목 수집 (KR: 한국 미디어, ZA: 남아공 현지 미디어)"""
     realtime_query = f"{query} when:1d"
     encoded_query = urllib.parse.quote(realtime_query)
-    url = f"https://news.google.com/rss/search?q={encoded_query}&hl=ko&gl=KR&ceid=KR:ko"
+    
+    if lang_zone == "ZA":
+        url = f"https://news.google.com/rss/search?q={encoded_query}&hl=en-ZA&gl=ZA&ceid=ZA:en"
+    else:
+        url = f"https://news.google.com/rss/search?q={encoded_query}&hl=ko&gl=KR&ceid=KR:ko"
     
     entries = []
     try:
@@ -188,11 +192,9 @@ def fetch_google_news_rss_realtime(query, max_hours=24):
             for entry in feed.entries:
                 title = getattr(entry, 'title', '')
                 
-                # 1. 블랙리스트 기사 제목 즉시 차단
                 if is_banned_title(title):
                     continue
                 
-                # 2. 날짜 검증
                 pub_dt = None
                 if hasattr(entry, 'published_parsed') and entry.published_parsed:
                     pub_dt = datetime(*entry.published_parsed[:6], tzinfo=timezone.utc)
@@ -211,7 +213,7 @@ def fetch_google_news_rss_realtime(query, max_hours=24):
                     'pub_ts': pub_dt.timestamp()
                 })
     except Exception as e:
-        print(f"⚠️ RSS 수집 경고 ({query}): {e}")
+        print(f"⚠️ RSS 수집 경고 ({query}, zone={lang_zone}): {e}")
     return entries
 
 def fetch_youtube_buzz(query, youtube_api_key):
@@ -240,14 +242,13 @@ def fetch_youtube_buzz(query, youtube_api_key):
         print(f"⚠️ YouTube API 경고: {e}")
     return []
 
-def merge_and_filter_entries(new_entries, cached_entries, max_hours=24):
-    """24시간 이내 소식 이월 유지 로직 (기존 캐시 파일 정제 포함)"""
+def merge_and_filter_entries(new_entries, cached_entries, max_hours=24, limit=10):
+    """24시간 이내 소식 이월 유지 로직 (카테고리별 최대 limit개 보장)"""
     now_ts = datetime.now(timezone.utc).timestamp()
     cutoff_ts = now_ts - (max_hours * 3600)
     
     combined_dict = {}
     
-    # 캐시된 이전 항목 중 블랙리스트 및 24시간 초과 항목 즉시 삭제
     for c in cached_entries:
         title = c.get('title', '')
         if is_banned_title(title):
@@ -255,7 +256,6 @@ def merge_and_filter_entries(new_entries, cached_entries, max_hours=24):
         if c.get('pub_ts', 0) >= cutoff_ts:
             combined_dict[title] = c
             
-    # 신규 수집 항목 병합
     for n in new_entries:
         title = n.get('title', '')
         if is_banned_title(title):
@@ -264,7 +264,7 @@ def merge_and_filter_entries(new_entries, cached_entries, max_hours=24):
             combined_dict[title] = n
             
     sorted_items = sorted(combined_dict.values(), key=lambda x: x['pub_ts'], reverse=True)
-    return sorted_items[:5]
+    return sorted_items[:limit]
 
 def clean_text(text):
     """ReportLab XML 파싱 오류 방지"""
@@ -314,14 +314,15 @@ def select_top_shorts_topics(data):
     return candidates[:3]
 
 def generate_report_data(service, folder_id):
-    """데이터 수집 및 이월 캐시 병합"""
+    """데이터 수집 및 이월 캐시 병합 (한국어 + 남아공 현지 영문 검색 병합)"""
     now_kst = datetime.now(ZoneInfo("Asia/Seoul"))
     time_str = now_kst.strftime("%Y-%m-%d_%H%M")
     
     old_cache = load_gdrive_cache(service, folder_id)
     new_cache = {}
     
-    queries = {
+    # 1. 한국어 검색 쿼리 (구글 뉴스 KR)
+    queries_kr = {
         'breaking': '(남아공 OR 아프리카 OR "South Africa") (속보 OR 긴급 OR 특종 OR 사건 OR 사고 OR 비상 OR "breaking news") -축구 -게임',
         'flights': '(남아공 OR "South Africa") (항공권 OR 비행기표 OR "flight ticket" OR "airfare") (특가 OR 프로모션 OR 할인 OR "discount") -무인 -LIG -밀코르 -축구 -배달 -특급',
         'exchanges': '((한국 OR 대한민국) (남아공 OR 아프리카) (문화제 OR 교류 OR "cultural exchange")) OR ((남아공 OR "South Africa") (한국 OR "Korea") (행사 OR 축제 OR "festival")) -아시안게임 -축구 -경기',
@@ -331,15 +332,30 @@ def generate_report_data(service, folder_id):
         'promotions': '(남아공 OR 대한민국 OR 아프리카) (관광 OR "tourism") (프로모션 OR 이벤트 OR 할인 OR 무료) -배달'
     }
     
+    # 2. 남아공 현지 영문 검색 쿼리 (구글 뉴스 ZA - News24, IOL, Daily Maverick 등 현지 미디어)
+    queries_za = {
+        'breaking': '("South Africa" OR Gauteng OR "Western Cape" OR "Cape Town" OR Johannesburg) (breaking OR alert OR urgent OR incident OR police OR government) -soccer -football',
+        'flights': '("South Africa" OR "Cape Town" OR Johannesburg) (flight OR airline OR airfare) (deal OR discount OR promo OR special)',
+        'exchanges': '("South Africa" OR Africa) Korea (culture OR exchange OR festival OR event)',
+        'sports': '("South Africa" OR Africa) Korea (match OR vs OR game OR tournament)',
+        'festivals': '("South Africa" OR "Cape Town") (food OR gastro OR wine OR festival)',
+        'mice': '"South Africa" (MICE OR exhibition OR conference OR forum OR summit)',
+        'promotions': '"South Africa" tourism (promotion OR deal OR offer OR discount)'
+    }
+    
     report_data = {
         'time_str': time_str,
         'now_kst_str': now_kst.strftime('%Y-%m-%d %H:%M:%S')
     }
     
-    for key, query in queries.items():
-        raw_entries = fetch_google_news_rss_realtime(query)
+    for key in queries_kr.keys():
+        raw_kr = fetch_google_news_rss_realtime(queries_kr[key], lang_zone="KR")
+        raw_za = fetch_google_news_rss_realtime(queries_za[key], lang_zone="ZA")
+        raw_entries = raw_kr + raw_za
+        
         cached_entries = old_cache.get(key, [])
-        merged = merge_and_filter_entries(raw_entries, cached_entries, max_hours=24)
+        # 카테고리당 최대 10개로 병합
+        merged = merge_and_filter_entries(raw_entries, cached_entries, max_hours=24, limit=10)
         report_data[key] = merged
         new_cache[key] = merged
         
@@ -363,7 +379,7 @@ def create_pdf_bytes(data):
         bottomMargin=35
     )
     
-    content_width = A4[0] - 70 # 525pt
+    content_width = A4[0] - 70 # 525.27pt
 
     title_style = ParagraphStyle(
         'DocTitle', fontName='HYGothic-Medium', fontSize=18, leading=22,

@@ -2,8 +2,8 @@ name: StariaPj Daily News Automation
 
 on:
   schedule:
-    - cron: '0 22 * * *'  # 한국 시간 오전 7시 (UTC 22:00)
-    - cron: '0 5 * * *'   # 남아공 시간 오전 7시 (UTC 05:00)
+    - cron: '5 22 * * *'  # 한국 시간 오전 7시 5분 (UTC 22:05)
+    - cron: '5 5 * * *'   # 남아공 시간 오전 7시 5분 (UTC 05:05)
   workflow_dispatch:
 
 jobs:

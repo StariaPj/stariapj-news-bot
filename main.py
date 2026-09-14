@@ -5,6 +5,10 @@ import json
 import requests
 import feedparser
 import urllib.parse
+import smtplib
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from email.mime.application import MIMEApplication
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from google.oauth2.credentials import Credentials
@@ -42,9 +46,7 @@ def get_gdrive_service():
     return build("drive", "v3", credentials=creds)
 
 def load_gdrive_cache(service, folder_id):
-    """
-    구글 드라이브에서 이전 수집 캐시(latest_news_cache.json)를 불러와 24시간 이내 소식을 이월
-    """
+    """구글 드라이브에서 이전 수집 캐시(latest_news_cache.json)를 불러와 24시간 이내 소식을 이월"""
     if not service or not folder_id:
         return {}
     try:
@@ -70,9 +72,7 @@ def load_gdrive_cache(service, folder_id):
         return {}
 
 def save_gdrive_cache(service, folder_id, cache_data):
-    """
-    이번에 수집/유지된 최신 24시간 소식을 구글 드라이브 캐시(latest_news_cache.json)로 갱신 저장
-    """
+    """이번에 수집/유지된 최신 24시간 소식을 구글 드라이브 캐시(latest_news_cache.json)로 갱신 저장"""
     if not service or not folder_id:
         return
     try:
@@ -100,9 +100,7 @@ def save_gdrive_cache(service, folder_id, cache_data):
         print(f"⚠️ 캐시 파일 저장 경고: {e}")
 
 def upload_json_to_gdrive(service, folder_id, cache_data, time_str):
-    """
-    독립된 날짜별 JSON 데이터 파일(StariaPj_Daily_Data_YYYY-MM-DD_HHMM_KST.json) 구글 드라이브 추가 업로드
-    """
+    """독립된 날짜별 JSON 데이터 파일(StariaPj_Daily_Data_YYYY-MM-DD_HHMM_KST.json) 구글 드라이브 추가 업로드"""
     if not service or not folder_id:
         return
     try:
@@ -119,6 +117,48 @@ def upload_json_to_gdrive(service, folder_id, cache_data, time_str):
         print(f"✅ Google Drive 독립 JSON 데이터 파일 업로드 성공! (파일명: {filename}, ID: {file.get('id')})")
     except Exception as e:
         print(f"⚠️ JSON 데이터 파일 업로드 실패: {e}")
+
+def send_email_with_pdf(pdf_bytes, time_str, recipient_email="pj2gwk@gmail.com"):
+    """PDF 리포트를 이메일 첨부파일로 지정 수신자에게 동시 발송"""
+    sender_user = os.environ.get("EMAIL_USER")
+    sender_pass = os.environ.get("EMAIL_PASS")
+
+    if not sender_user or not sender_pass:
+        print("⚠️ 이메일 발송 설정(EMAIL_USER, EMAIL_PASS)이 등록되지 않아 이메일 전송을 스킵합니다.")
+        return
+
+    try:
+        msg = MIMEMultipart()
+        msg['From'] = sender_user
+        msg['To'] = recipient_email
+        msg['Subject'] = f"[StariaPj] 온타임 24시간 실시간 소식지 ({time_str} KST)"
+
+        body_text = f"""안녕하세요, StariaPj 자동화 소식지 시스템입니다.
+
+요청하신 최근 24시간 실시간 온타임(On-Time) 특보 소식지 및 Shorts 제작 추천 리포트(PDF)를 첨부하여 전송합니다.
+
+- 발행 시각: {time_str} (KST)
+- 수신 이메일: {recipient_email}
+
+감사합니다.
+"""
+        msg.attach(MIMEText(body_text, 'plain', 'utf-8'))
+
+        # PDF 첨부
+        pdf_filename = f"StariaPj_Daily_Report_{time_str}_KST.pdf"
+        pdf_attachment = MIMEApplication(pdf_bytes, _subtype="pdf")
+        pdf_attachment.add_header('Content-Disposition', 'attachment', filename=pdf_filename)
+        msg.attach(pdf_attachment)
+
+        # Gmail SMTP버퍼 송신
+        with smtplib.SMTP("smtp.gmail.com", 587) as server:
+            server.starttls()
+            server.login(sender_user, sender_pass)
+            server.send_message(msg)
+
+        print(f"📧 이메일 발송 완료! ({recipient_email} (으)로 성공적으로 전송되었습니다.)")
+    except Exception as e:
+        print(f"❌ 이메일 발송 오류: {e}")
 
 def fetch_google_news_rss_realtime(query):
     """Google News RSS 최신 24시간 항목 수집"""
@@ -174,9 +214,7 @@ def fetch_youtube_buzz(query, youtube_api_key):
     return []
 
 def merge_and_filter_entries(new_entries, cached_entries, max_hours=24):
-    """
-    24시간 이내 소식 이월 유지 로직
-    """
+    """24시간 이내 소식 이월 유지 로직"""
     now_ts = datetime.now(timezone.utc).timestamp()
     cutoff_ts = now_ts - (max_hours * 3600)
     
@@ -419,11 +457,14 @@ if __name__ == "__main__":
     report_data = generate_report_data(service, folder_id)
     pdf_bytes = create_pdf_bytes(report_data)
     
-    # 1. PDF 리포트 파일 업로드
+    # 1. 구글 드라이브 PDF 업로드
     upload_to_gdrive(service, folder_id, pdf_bytes, report_data['time_str'])
     
-    # 2. 독립된 JSON 데이터 파일 업로드 (StariaPj_Daily_Data_YYYY-MM-DD_HHMM_KST.json)
+    # 2. 구글 드라이브 독립 JSON 업로드
     upload_json_to_gdrive(service, folder_id, report_data['new_cache'], report_data['time_str'])
     
-    # 3. 이월용 최신 캐시 파일(latest_news_cache.json) 갱신
+    # 3. 최신 캐시 파일(latest_news_cache.json) 갱신
     save_gdrive_cache(service, folder_id, report_data['new_cache'])
+    
+    # 4. pj2gwk@gmail.com 으로 PDF 리포트 자동 발송
+    send_email_with_pdf(pdf_bytes, report_data['time_str'], recipient_email="pj2gwk@gmail.com")

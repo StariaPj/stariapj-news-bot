@@ -8,16 +8,16 @@ from googleapiclient.http import MediaInMemoryUpload
 def generate_report():
     """
     일일 뉴스/마크다운 리포트를 생성하는 함수
-    (필요에 따라 기존 뉴스 수집 logic 코드로 교체 가능합니다)
+    (날짜 및 시분까지 포함하여 중복 생성 방지)
     """
-    today_str = datetime.now().strftime("%Y-%m-%d")
-    content = f"# StariaPj Daily Report ({today_str})\n\n"
+    now_str = datetime.now().strftime("%Y-%m-%d_%H%M")
+    content = f"# StariaPj Daily Report ({now_str})\n\n"
     content += "## Today's Automation Summary\n"
     content += "- StariaPj Daily News Automation script ran successfully.\n"
     content += "- Generated via GitHub Actions and uploaded using Google Drive OAuth 2.0.\n"
-    return content, today_str
+    return content, now_str
 
-def upload_to_gdrive(content, today_str):
+def upload_to_gdrive(content, time_str):
     client_id = os.environ.get("GDRIVE_CLIENT_ID")
     client_secret = os.environ.get("GDRIVE_CLIENT_SECRET")
     refresh_token = os.environ.get("GDRIVE_REFRESH_TOKEN")
@@ -51,7 +51,8 @@ def upload_to_gdrive(content, today_str):
         # 4. Google Drive API 서비스 빌드 및 업로드
         service = build("drive", "v3", credentials=creds)
 
-        filename = f"StariaPj_Daily_Report_{today_str}.md"
+        # 파일명에 시분(time_str) 추가
+        filename = f"StariaPj_Daily_Report_{time_str}.md"
         file_metadata = {
             "name": filename,
             "parents": [folder_id],
@@ -67,12 +68,12 @@ def upload_to_gdrive(content, today_str):
             supportsAllDrives=True
         ).execute()
 
-        print(f"✅ Google Drive 업로드 성공! (파일 ID: {file.get('id')})")
+        print(f"✅ Google Drive 업로드 성공! (파일명: {filename}, ID: {file.get('id')})")
 
     except Exception as e:
         print(f"❌ Google Drive 업로드 실패: {e}")
         sys.exit(1)
 
 if __name__ == "__main__":
-    report_content, today_str = generate_report()
-    upload_to_gdrive(report_content, today_str)
+    report_content, time_str = generate_report()
+    upload_to_gdrive(report_content, time_str)

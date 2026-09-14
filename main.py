@@ -30,6 +30,20 @@ pdfmetrics.registerFont(UnicodeCIDFont('HYSMyeongJo-Medium'))
 # 🚫 오래된 노이즈 및 예전 기사 제목 블랙리스트 키워드
 BANNED_TITLE_KEYWORDS = ["홍명보", "체코", "16년 만에", "미주조선일보", "2-1 역전승", "히딩크", "벤투"]
 
+# 🎨 10단계 중요도 순 그라데이션 색상 (1위: 가장 짙은 먹색 ~ 10위: 옅은 은은한 회색)
+GRADIENT_COLORS = [
+    '#0F172A',  # 1위 (TOP): 가장 짙은 먹색 (최우선 시선 집중)
+    '#1E293B',  # 2위
+    '#334155',  # 3위
+    '#475569',  # 4위
+    '#64748B',  # 5위
+    '#718096',  # 6위
+    '#8592A6',  # 7위
+    '#94A3B8',  # 8위
+    '#A0AEC0',  # 9위
+    '#CBD5E1'   # 10위: 가장 옅은 회색 (하위 소식)
+]
+
 def is_banned_title(title):
     """블랙리스트 키워드가 포함된 예전/불필요 기사 여부 검사"""
     if not title:
@@ -243,7 +257,7 @@ def fetch_youtube_buzz(query, youtube_api_key):
     return []
 
 def merge_and_filter_entries(new_entries, cached_entries, max_hours=24, limit=10):
-    """24시간 이내 소식 이월 유지 로직 (카테고리별 최대 limit개 보장)"""
+    """24시간 이내 소식 이월 유지 및 중요도/최신순 내림차순 정렬 (최대 limit개)"""
     now_ts = datetime.now(timezone.utc).timestamp()
     cutoff_ts = now_ts - (max_hours * 3600)
     
@@ -263,6 +277,7 @@ def merge_and_filter_entries(new_entries, cached_entries, max_hours=24, limit=10
         if n.get('pub_ts', 0) >= cutoff_ts:
             combined_dict[title] = n
             
+    # 중요도/발행 시각 기준 내림차순 정렬 (가장 최신/중요 소식이 1위 맨 위로)
     sorted_items = sorted(combined_dict.values(), key=lambda x: x['pub_ts'], reverse=True)
     return sorted_items[:limit]
 
@@ -321,7 +336,6 @@ def generate_report_data(service, folder_id):
     old_cache = load_gdrive_cache(service, folder_id)
     new_cache = {}
     
-    # 1. 한국어 검색 쿼리 (구글 뉴스 KR)
     queries_kr = {
         'breaking': '(남아공 OR 아프리카 OR "South Africa") (속보 OR 긴급 OR 특종 OR 사건 OR 사고 OR 비상 OR "breaking news") -축구 -게임',
         'flights': '(남아공 OR "South Africa") (항공권 OR 비행기표 OR "flight ticket" OR "airfare") (특가 OR 프로모션 OR 할인 OR "discount") -무인 -LIG -밀코르 -축구 -배달 -특급',
@@ -332,7 +346,6 @@ def generate_report_data(service, folder_id):
         'promotions': '(남아공 OR 대한민국 OR 아프리카) (관광 OR "tourism") (프로모션 OR 이벤트 OR 할인 OR 무료) -배달'
     }
     
-    # 2. 남아공 현지 영문 검색 쿼리 (구글 뉴스 ZA - News24, IOL, Daily Maverick 등 현지 미디어)
     queries_za = {
         'breaking': '("South Africa" OR Gauteng OR "Western Cape" OR "Cape Town" OR Johannesburg) (breaking OR alert OR urgent OR incident OR police OR government) -soccer -football',
         'flights': '("South Africa" OR "Cape Town" OR Johannesburg) (flight OR airline OR airfare) (deal OR discount OR promo OR special)',
@@ -354,7 +367,6 @@ def generate_report_data(service, folder_id):
         raw_entries = raw_kr + raw_za
         
         cached_entries = old_cache.get(key, [])
-        # 카테고리당 최대 10개로 병합
         merged = merge_and_filter_entries(raw_entries, cached_entries, max_hours=24, limit=10)
         report_data[key] = merged
         new_cache[key] = merged
@@ -368,7 +380,7 @@ def generate_report_data(service, folder_id):
     return report_data
 
 def create_pdf_bytes(data):
-    """가독성 및 디자인이 대폭 강화된 PDF 리포트 생성"""
+    """중요도 배치 및 10단계 시각적 그라데이션이 적용된 PDF 리포트 생성"""
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(
         buffer,
@@ -407,18 +419,6 @@ def create_pdf_bytes(data):
         textColor=colors.HexColor('#2B6CB0')
     )
 
-    tag_style = ParagraphStyle(
-        'TagStyle', fontName='HYGothic-Medium', fontSize=9, leading=13,
-        textColor=colors.HexColor('#2B6CB0')
-    )
-    alert_tag_style = ParagraphStyle(
-        'AlertTagStyle', fontName='HYGothic-Medium', fontSize=9, leading=13,
-        textColor=colors.HexColor('#C53030')
-    )
-    body_text_style = ParagraphStyle(
-        'BodyText', fontName='HYSMyeongJo-Medium', fontSize=9, leading=13.5,
-        textColor=colors.HexColor('#2D3748')
-    )
     empty_style = ParagraphStyle(
         'EmptyText', fontName='HYSMyeongJo-Medium', fontSize=8.5, leading=12,
         textColor=colors.HexColor('#A0AEC0')
@@ -426,10 +426,12 @@ def create_pdf_bytes(data):
 
     story = []
     
+    # 1. 헤더 영역
     story.append(Paragraph("StariaPj 온타임 24시간 긴급속보 &amp; Shorts 제작 리포트", title_style))
     story.append(Paragraph(f"발행 일시: {data['now_kst_str']} (KST) | 최근 24시간 유효 소식 및 숏츠 대본 가이드", subtitle_style))
     story.append(HRFlowable(width="100%", thickness=2, color=colors.HexColor('#5A67D8'), spaceAfter=12))
     
+    # 2. 🎬 Shorts 추천 TOP 3
     shorts_header_p = Paragraph("<font color='#5A67D8'><b>🎬 [필수 제작] 지금 당장 쇼츠(Shorts)로 만들어야 하는 주제 TOP 3</b></font>", ParagraphStyle('SH', fontName='HYGothic-Medium', fontSize=11, leading=15))
     sh_table = Table([[shorts_header_p]], colWidths=[content_width])
     sh_table.setStyle(TableStyle([
@@ -515,13 +517,35 @@ def create_pdf_bytes(data):
         items = data.get(key, [])
         if items:
             table_rows = []
-            for item in items:
-                tag_txt = "[속보]" if key == 'breaking' else ("[특가]" if key == 'flights' else "[소식]")
-                p_tag = Paragraph(tag_txt, alert_tag_style if is_alert else tag_style)
-                p_body = Paragraph(clean_text(item['title']), body_text_style)
+            for idx, item in enumerate(items):
+                # 중요도 및 순위에 따른 10단계 그라데이션 컬러 적용
+                color_hex = GRADIENT_COLORS[min(idx, len(GRADIENT_COLORS)-1)]
+                
+                # 1위 (최상단 TOP 1) 강조 스타일
+                if idx == 0:
+                    tag_txt = "[🔥TOP]" if is_alert else "[⭐TOP]"
+                    p_tag = Paragraph(f"<b>{tag_txt}</b>", ParagraphStyle(
+                        f'TagTop_{key}', fontName='HYGothic-Medium', fontSize=9, leading=13,
+                        textColor=colors.HexColor('#C53030' if is_alert else '#2B6CB0')
+                    ))
+                    p_body = Paragraph(f"<b>{clean_text(item['title'])}</b>", ParagraphStyle(
+                        f'BodyTop_{key}', fontName='HYGothic-Medium', fontSize=9.5, leading=14,
+                        textColor=colors.HexColor(color_hex)
+                    ))
+                else:
+                    tag_txt = "[속보]" if key == 'breaking' else ("[특가]" if key == 'flights' else "[소식]")
+                    p_tag = Paragraph(tag_txt, ParagraphStyle(
+                        f'Tag_{key}_{idx}', fontName='HYGothic-Medium', fontSize=8.5, leading=12,
+                        textColor=colors.HexColor(color_hex)
+                    ))
+                    p_body = Paragraph(clean_text(item['title']), ParagraphStyle(
+                        f'Body_{key}_{idx}', fontName='HYGothic-Medium', fontSize=8.5, leading=13,
+                        textColor=colors.HexColor(color_hex)
+                    ))
+                
                 table_rows.append([p_tag, p_body])
                 
-            sec_table = Table(table_rows, colWidths=[45, content_width - 45])
+            sec_table = Table(table_rows, colWidths=[48, content_width - 48])
             sec_table.setStyle(TableStyle([
                 ('VALIGN', (0,0), (-1,-1), 'TOP'),
                 ('LEFTPADDING', (0,0), (-1,-1), 4),
@@ -540,10 +564,11 @@ def create_pdf_bytes(data):
         story.append(create_section_bar("▶️ [YouTube 24HR 바이럴 영상]", False))
         story.append(Spacer(1, 4))
         yt_rows = []
-        for vid in data['yt_videos']:
+        for idx, vid in enumerate(data['yt_videos']):
+            color_hex = GRADIENT_COLORS[min(idx, len(GRADIENT_COLORS)-1)]
             v_title = clean_text(vid['snippet']['title'])
-            p_tag = Paragraph("[Shorts]", tag_style)
-            p_body = Paragraph(v_title, body_text_style)
+            p_tag = Paragraph("[Shorts]", ParagraphStyle(f'YTag_{idx}', fontName='HYGothic-Medium', fontSize=8.5, leading=12, textColor=colors.HexColor(color_hex)))
+            p_body = Paragraph(v_title, ParagraphStyle(f'YBody_{idx}', fontName='HYGothic-Medium', fontSize=8.5, leading=13, textColor=colors.HexColor(color_hex)))
             yt_rows.append([p_tag, p_body])
             
         yt_table = Table(yt_rows, colWidths=[50, content_width - 50])

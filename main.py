@@ -71,7 +71,7 @@ def load_gdrive_cache(service, folder_id):
         if not files:
             return {}
         
-        file_id = files['id']
+        file_id = files[0]['id']
         request = service.files().get_media(fileId=file_id)
         fh = io.BytesIO()
         downloader = MediaIoBaseDownload(fh, request)
@@ -99,7 +99,7 @@ def save_gdrive_cache(service, folder_id, cache_data):
         files = results.get('files', [])
         
         if files:
-            file_id = files['id']
+            file_id = files[0]['id']
             service.files().update(fileId=file_id, media_body=media).execute()
         else:
             file_metadata = {
@@ -363,7 +363,7 @@ def create_pdf_bytes(data):
         bottomMargin=35
     )
     
-    content_width = A4 - 70 # 525pt
+    content_width = A4[0] - 70 # 525pt
 
     title_style = ParagraphStyle(
         'DocTitle', fontName='HYGothic-Medium', fontSize=18, leading=22,

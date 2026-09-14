@@ -19,8 +19,8 @@ from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.cidfonts import UnicodeCIDFont
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, HRFlowable
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, HRFlowable, Table, TableStyle
+from reportlab.lib.styles import ParagraphStyle
 
 # 1. ReportLab 내장 한글 폰트 등록
 pdfmetrics.registerFont(UnicodeCIDFont('HYGothic-Medium'))
@@ -144,13 +144,11 @@ def send_email_with_pdf(pdf_bytes, time_str, recipient_email="pj2gwk@gmail.com")
 """
         msg.attach(MIMEText(body_text, 'plain', 'utf-8'))
 
-        # PDF 첨부
         pdf_filename = f"StariaPj_Daily_Report_{time_str}_KST.pdf"
         pdf_attachment = MIMEApplication(pdf_bytes, _subtype="pdf")
         pdf_attachment.add_header('Content-Disposition', 'attachment', filename=pdf_filename)
         msg.attach(pdf_attachment)
 
-        # Gmail SMTP버퍼 송신
         with smtplib.SMTP("smtp.gmail.com", 587) as server:
             server.starttls()
             server.login(sender_user, sender_pass)
@@ -317,57 +315,86 @@ def generate_report_data(service, folder_id):
     return report_data
 
 def create_pdf_bytes(data):
-    """PDF 리포트 생성"""
+    """가독성 및 디자인이 대폭 강화된 PDF 리포트 생성"""
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(
         buffer,
         pagesize=A4,
-        leftMargin=40,
-        rightMargin=40,
-        topMargin=40,
-        bottomMargin=40
+        leftMargin=35,
+        rightMargin=35,
+        topMargin=35,
+        bottomMargin=35
     )
     
+    content_width = A4[0] - 70 # 525pt
+
+    # 스타일 정의
     title_style = ParagraphStyle(
         'DocTitle', fontName='HYGothic-Medium', fontSize=18, leading=22,
-        textColor=colors.HexColor('#1A365D'), spaceAfter=6
+        textColor=colors.HexColor('#1A202C'), spaceAfter=4
     )
     subtitle_style = ParagraphStyle(
         'SubTitle', fontName='HYSMyeongJo-Medium', fontSize=9, leading=13,
-        textColor=colors.HexColor('#4A5568'), spaceAfter=10
+        textColor=colors.HexColor('#718096'), spaceAfter=10
     )
-    h2_style = ParagraphStyle(
-        'Heading2', fontName='HYGothic-Medium', fontSize=11.5, leading=15,
-        textColor=colors.HexColor('#2B6CB0'), spaceBefore=8, spaceAfter=4
+    
+    # Shorts 카드의 텍스트 스타일
+    card_title_style = ParagraphStyle(
+        'CardTitle', fontName='HYGothic-Medium', fontSize=10, leading=14,
+        textColor=colors.HexColor('#2D3748')
     )
-    shorts_h2_style = ParagraphStyle(
-        'ShortsH2', fontName='HYGothic-Medium', fontSize=12, leading=16,
-        textColor=colors.HexColor('#6B46C1'), spaceBefore=4, spaceAfter=6
+    card_reason_style = ParagraphStyle(
+        'CardReason', fontName='HYSMyeongJo-Medium', fontSize=8.5, leading=12,
+        textColor=colors.HexColor('#4A5568')
     )
-    body_style = ParagraphStyle(
-        'BodyCustom', fontName='HYSMyeongJo-Medium', fontSize=9, leading=13,
-        textColor=colors.HexColor('#2D3748'), spaceAfter=4
+    card_hook_style = ParagraphStyle(
+        'CardHook', fontName='HYGothic-Medium', fontSize=9, leading=13,
+        textColor=colors.HexColor('#C53030')
     )
-    shorts_body_style = ParagraphStyle(
-        'ShortsBody', fontName='HYSMyeongJo-Medium', fontSize=9, leading=13,
-        textColor=colors.HexColor('#2C5282'), spaceAfter=3
+    card_script_style = ParagraphStyle(
+        'CardScript', fontName='HYSMyeongJo-Medium', fontSize=8.5, leading=12,
+        textColor=colors.HexColor('#2B6CB0')
     )
-    alert_style = ParagraphStyle(
-        'AlertCustom', fontName='HYGothic-Medium', fontSize=9, leading=13,
-        textColor=colors.HexColor('#C53030'), spaceAfter=3
+
+    # 섹션 본문 스타일
+    tag_style = ParagraphStyle(
+        'TagStyle', fontName='HYGothic-Medium', fontSize=9, leading=13,
+        textColor=colors.HexColor('#2B6CB0')
+    )
+    alert_tag_style = ParagraphStyle(
+        'AlertTagStyle', fontName='HYGothic-Medium', fontSize=9, leading=13,
+        textColor=colors.HexColor('#C53030')
+    )
+    body_text_style = ParagraphStyle(
+        'BodyText', fontName='HYSMyeongJo-Medium', fontSize=9, leading=13.5,
+        textColor=colors.HexColor('#2D3748')
     )
     empty_style = ParagraphStyle(
-        'EmptyCustom', fontName='HYSMyeongJo-Medium', fontSize=8.5, leading=12,
-        textColor=colors.HexColor('#718096'), spaceAfter=3
+        'EmptyText', fontName='HYSMyeongJo-Medium', fontSize=8.5, leading=12,
+        textColor=colors.HexColor('#A0AEC0')
     )
 
     story = []
     
-    story.append(Paragraph("StariaPj 온타임 24시간 긴급속보 & Shorts 제작 리포트", title_style))
-    story.append(Paragraph(f"발행 일시: {data['now_kst_str']} (KST) | 최근 24시간 유효 소식 및 Shorts 추천", subtitle_style))
-    story.append(HRFlowable(width="100%", thickness=1.5, color=colors.HexColor('#6B46C1'), spaceAfter=10))
+    # 1. 헤더 영역
+    story.append(Paragraph("StariaPj 온타임 24시간 긴급속보 &amp; Shorts 제작 리포트", title_style))
+    story.append(Paragraph(f"발행 일시: {data['now_kst_str']} (KST) | 최근 24시간 유효 소식 및 숏츠 대본 가이드", subtitle_style))
+    story.append(HRFlowable(width="100%", thickness=2, color=colors.HexColor('#5A67D8'), spaceAfter=12))
     
-    story.append(Paragraph("🎬 [필수 제작] 지금 당장 쇼츠(Shorts)로 만들어야 하는 주제 TOP 3", shorts_h2_style))
+    # 2. 🎬 Shorts 추천 TOP 3 (강조 콜아웃 카드 레이아웃)
+    shorts_header_p = Paragraph("<font color='#5A67D8'><b>🎬 [필수 제작] 지금 당장 쇼츠(Shorts)로 만들어야 하는 주제 TOP 3</b></font>", ParagraphStyle('SH', fontName='HYGothic-Medium', fontSize=11, leading=15))
+    sh_table = Table([[shorts_header_p]], colWidths=[content_width])
+    sh_table.setStyle(TableStyle([
+        ('BACKGROUND', (0,0), (-1,-1), colors.HexColor('#F3E8FF')),
+        ('LEFTPADDING', (0,0), (-1,-1), 8),
+        ('RIGHTPADDING', (0,0), (-1,-1), 8),
+        ('TOPPADDING', (0,0), (-1,-1), 6),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 6),
+        ('LINELEFT', (0,0), (0,-1), 4, colors.HexColor('#6B46C1')),
+    ]))
+    story.append(sh_table)
+    story.append(Spacer(1, 6))
+
     if data['shorts_top3']:
         for idx, item in enumerate(data['shorts_top3'], 1):
             clean_t = clean_text(item['title'])
@@ -375,17 +402,56 @@ def create_pdf_bytes(data):
             clean_hk = clean_text(item.get('hook', ''))
             clean_sc = clean_text(item.get('script', ''))
             
-            story.append(Paragraph(f"<b>{idx}. [{item['category']}]</b> {clean_t}", alert_style if '🚨' in item['category'] else shorts_body_style))
-            story.append(Paragraph(f"   └ 💡 <b>추천 이유:</b> <i>{clean_r}</i>", empty_style))
-            story.append(Paragraph(f"   └ 🎯 <b>3초 Hook 멘트:</b> <font color='#C53030'><b>{clean_hk}</b></font>", body_style))
-            story.append(Paragraph(f"   └ ⏱️ <b>30초 대본 개요:</b> {clean_sc}", empty_style))
-            story.append(Spacer(1, 4))
+            card_p_list = [
+                Paragraph(f"<b>{idx}. [{item['category']}]</b> {clean_t}", card_title_style),
+                Spacer(1, 2),
+                Paragraph(f"💡 <b>추천 이유:</b> <i>{clean_r}</i>", card_reason_style),
+                Spacer(1, 2),
+                Paragraph(f"🎯 <b>3초 Hook 멘트:</b> {clean_hk}", card_hook_style),
+                Spacer(1, 2),
+                Paragraph(f"⏱️ <b>30초 대본 개요:</b> {clean_sc}", card_script_style)
+            ]
+            
+            card_table = Table([[card_p_list]], colWidths=[content_width])
+            card_table.setStyle(TableStyle([
+                ('BACKGROUND', (0,0), (-1,-1), colors.HexColor('#FAF5FF')),
+                ('BOX', (0,0), (-1,-1), 0.8, colors.HexColor('#E9D8FD')),
+                ('LINELEFT', (0,0), (0,-1), 3.5, colors.HexColor('#805AD5')),
+                ('LEFTPADDING', (0,0), (-1,-1), 10),
+                ('RIGHTPADDING', (0,0), (-1,-1), 10),
+                ('TOPPADDING', (0,0), (-1,-1), 8),
+                ('BOTTOMPADDING', (0,0), (-1,-1), 8),
+            ]))
+            story.append(card_table)
+            story.append(Spacer(1, 6))
     else:
-        story.append(Paragraph("• 최근 24시간 이내 수집된 소식지 내용 중 별도 추천할 파급 이슈가 없습니다. (Blank 유지)", empty_style))
+        empty_p = Paragraph("• 최근 24시간 이내 수집된 소식지 내용 중 별도 추천할 파급 이슈가 없습니다.", empty_style)
+        story.append(empty_p)
         
-    story.append(Spacer(1, 4))
-    story.append(HRFlowable(width="100%", thickness=0.8, color=colors.HexColor('#CBD5E0'), spaceAfter=8))
+    story.append(Spacer(1, 8))
+    story.append(HRFlowable(width="100%", thickness=0.8, color=colors.HexColor('#E2E8F0'), spaceAfter=10))
     
+    # Helper: 섹션 헤더 바 생성 함수
+    def create_section_bar(title_text, is_alert=False):
+        accent_color = '#E53E3E' if is_alert else '#3182CE'
+        bg_color = '#FFF5F5' if is_alert else '#EBF8FF'
+        text_color = '#9B2C2C' if is_alert else '#2B6CB0'
+        
+        p = Paragraph(f"<b>{title_text}</b>", ParagraphStyle(
+            'SecHeaderP', fontName='HYGothic-Medium', fontSize=10.5, leading=14,
+            textColor=colors.HexColor(text_color)
+        ))
+        t = Table([[p]], colWidths=[content_width])
+        t.setStyle(TableStyle([
+            ('BACKGROUND', (0,0), (-1,-1), colors.HexColor(bg_color)),
+            ('LINELEFT', (0,0), (0,-1), 3.5, colors.HexColor(accent_color)),
+            ('LEFTPADDING', (0,0), (-1,-1), 8),
+            ('RIGHTPADDING', (0,0), (-1,-1), 8),
+            ('TOPPADDING', (0,0), (-1,-1), 4),
+            ('BOTTOMPADDING', (0,0), (-1,-1), 4),
+        ]))
+        return t
+
     sections = [
         ('breaking', '🚨 [실시간 긴급 속보] 남아공 · 아프리카 · 한국 관련 주요 사건/사고', True),
         ('flights', '✈️ [항공 특가] 한국 ↔ 남아공 24HR 특가 항공권 & 프로모션', True),
@@ -397,24 +463,53 @@ def create_pdf_bytes(data):
     ]
     
     for key, sec_title, is_alert in sections:
-        story.append(Paragraph(sec_title, h2_style))
+        story.append(create_section_bar(sec_title, is_alert))
+        story.append(Spacer(1, 4))
         items = data.get(key, [])
         if items:
+            table_rows = []
             for item in items:
-                prefix = "• <b>[속보]</b> " if key == 'breaking' else ("• <b>[특가]</b> " if key == 'flights' else "• ")
-                style = alert_style if is_alert else body_style
-                story.append(Paragraph(f"{prefix}{clean_text(item['title'])}", style))
+                tag_txt = "[속보]" if key == 'breaking' else ("[특가]" if key == 'flights' else "[소식]")
+                p_tag = Paragraph(tag_txt, alert_tag_style if is_alert else tag_style)
+                p_body = Paragraph(clean_text(item['title']), body_text_style)
+                table_rows.append([p_tag, p_body])
+                
+            sec_table = Table(table_rows, colWidths=[45, content_width - 45])
+            sec_table.setStyle(TableStyle([
+                ('VALIGN', (0,0), (-1,-1), 'TOP'),
+                ('LEFTPADDING', (0,0), (-1,-1), 4),
+                ('RIGHTPADDING', (0,0), (-1,-1), 4),
+                ('TOPPADDING', (0,0), (-1,-1), 2),
+                ('BOTTOMPADDING', (0,0), (-1,-1), 4),
+                ('LINEBELOW', (0,0), (-1,-2), 0.5, colors.HexColor('#EDF2F7'))
+            ]))
+            story.append(sec_table)
         else:
             story.append(Paragraph("• 최근 24시간 이내 등록되거나 유효한 소식이 없습니다.", empty_style))
-        story.append(Spacer(1, 3))
+        story.append(Spacer(1, 6))
 
+    # 8. 유튜브 미디어 화제성
     if data['yt_videos']:
-        story.append(Spacer(1, 3))
-        story.append(Paragraph("▶️ [YouTube 24HR 바이럴 영상]", h2_style))
+        story.append(Spacer(1, 2))
+        story.append(create_section_bar("▶️ [YouTube 24HR 바이럴 영상]", False))
+        story.append(Spacer(1, 4))
+        yt_rows = []
         for vid in data['yt_videos']:
-            v_title = vid['snippet']['title']
-            story.append(Paragraph(f"• <b>[Shorts/Video]</b> {clean_text(v_title)}", body_style))
+            v_title = clean_text(vid['snippet']['title'])
+            p_tag = Paragraph("[Shorts]", tag_style)
+            p_body = Paragraph(v_title, body_text_style)
+            yt_rows.append([p_tag, p_body])
             
+        yt_table = Table(yt_rows, colWidths=[50, content_width - 50])
+        yt_table.setStyle(TableStyle([
+            ('VALIGN', (0,0), (-1,-1), 'TOP'),
+            ('LEFTPADDING', (0,0), (-1,-1), 4),
+            ('RIGHTPADDING', (0,0), (-1,-1), 4),
+            ('TOPPADDING', (0,0), (-1,-1), 2),
+            ('BOTTOMPADDING', (0,0), (-1,-1), 4),
+        ]))
+        story.append(yt_table)
+
     doc.build(story)
     buffer.seek(0)
     return buffer.getvalue()

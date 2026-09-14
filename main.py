@@ -27,6 +27,18 @@ from reportlab.lib.styles import ParagraphStyle
 pdfmetrics.registerFont(UnicodeCIDFont('HYGothic-Medium'))
 pdfmetrics.registerFont(UnicodeCIDFont('HYSMyeongJo-Medium'))
 
+# 🚫 오래된 노이즈 및 예전 기사 제목 블랙리스트 키워드
+BANNED_TITLE_KEYWORDS = ["홍명보", "체코", "16년 만에", "미주조선일보", "2-1 역전승", "히딩크", "벤투"]
+
+def is_banned_title(title):
+    """블랙리스트 키워드가 포함된 예전/불필요 기사 여부 검사"""
+    if not title:
+        return True
+    for kw in BANNED_TITLE_KEYWORDS:
+        if kw in title:
+            return True
+    return False
+
 def get_gdrive_service():
     """Google Drive API 서비스 객체 생성"""
     client_id = os.environ.get("GDRIVE_CLIENT_ID")
@@ -59,7 +71,7 @@ def load_gdrive_cache(service, folder_id):
         if not files:
             return {}
         
-        file_id = files[0]['id']
+        file_id = files['id']
         request = service.files().get_media(fileId=file_id)
         fh = io.BytesIO()
         downloader = MediaIoBaseDownload(fh, request)
@@ -87,7 +99,7 @@ def save_gdrive_cache(service, folder_id, cache_data):
         files = results.get('files', [])
         
         if files:
-            file_id = files[0]['id']
+            file_id = files['id']
             service.files().update(fileId=file_id, media_body=media).execute()
         else:
             file_metadata = {
@@ -160,7 +172,7 @@ def send_email_with_pdf(pdf_bytes, time_str, recipient_email="pj2gwk@gmail.com")
         print(f"❌ 이메일 발송 오류: {e}")
 
 def fetch_google_news_rss_realtime(query, max_hours=24):
-    """Google News RSS 최신 24시간 항목 수집 (엄격한 날짜 검증 적용)"""
+    """Google News RSS 최신 24시간 항목 수집 (날짜 및 블랙리스트 검증 적용)"""
     realtime_query = f"{query} when:1d"
     encoded_query = urllib.parse.quote(realtime_query)
     url = f"https://news.google.com/rss/search?q={encoded_query}&hl=ko&gl=KR&ceid=KR:ko"
@@ -174,6 +186,13 @@ def fetch_google_news_rss_realtime(query, max_hours=24):
             cutoff_dt = now_utc - timedelta(hours=max_hours)
             
             for entry in feed.entries:
+                title = getattr(entry, 'title', '')
+                
+                # 1. 블랙리스트 기사 제목 즉시 차단
+                if is_banned_title(title):
+                    continue
+                
+                # 2. 날짜 검증
                 pub_dt = None
                 if hasattr(entry, 'published_parsed') and entry.published_parsed:
                     pub_dt = datetime(*entry.published_parsed[:6], tzinfo=timezone.utc)
@@ -183,12 +202,11 @@ def fetch_google_news_rss_realtime(query, max_hours=24):
                     except Exception:
                         pub_dt = None
                 
-                # 날짜 검증 불가능하거나 24시간 초과 기사는 엄격히 제외
                 if not pub_dt or pub_dt < cutoff_dt:
                     continue
                 
                 entries.append({
-                    'title': entry.title,
+                    'title': title,
                     'link': getattr(entry, 'link', ''),
                     'pub_ts': pub_dt.timestamp()
                 })
@@ -223,19 +241,27 @@ def fetch_youtube_buzz(query, youtube_api_key):
     return []
 
 def merge_and_filter_entries(new_entries, cached_entries, max_hours=24):
-    """24시간 이내 소식 이월 유지 로직"""
+    """24시간 이내 소식 이월 유지 로직 (기존 캐시 파일 정제 포함)"""
     now_ts = datetime.now(timezone.utc).timestamp()
     cutoff_ts = now_ts - (max_hours * 3600)
     
     combined_dict = {}
     
+    # 캐시된 이전 항목 중 블랙리스트 및 24시간 초과 항목 즉시 삭제
     for c in cached_entries:
+        title = c.get('title', '')
+        if is_banned_title(title):
+            continue
         if c.get('pub_ts', 0) >= cutoff_ts:
-            combined_dict[c['title']] = c
+            combined_dict[title] = c
             
+    # 신규 수집 항목 병합
     for n in new_entries:
+        title = n.get('title', '')
+        if is_banned_title(title):
+            continue
         if n.get('pub_ts', 0) >= cutoff_ts:
-            combined_dict[n['title']] = n
+            combined_dict[title] = n
             
     sorted_items = sorted(combined_dict.values(), key=lambda x: x['pub_ts'], reverse=True)
     return sorted_items[:5]
@@ -295,7 +321,6 @@ def generate_report_data(service, folder_id):
     old_cache = load_gdrive_cache(service, folder_id)
     new_cache = {}
     
-    # 과거 대표팀 및 구 연도 키워드 차단 (-홍명보 -히딩크 -벤투 -2010 -2012 -2014 -2018 -2022)
     queries = {
         'breaking': '(남아공 OR 아프리카 OR "South Africa") (속보 OR 긴급 OR 특종 OR 사건 OR 사고 OR 비상 OR "breaking news") -축구 -게임',
         'flights': '(남아공 OR "South Africa") (항공권 OR 비행기표 OR "flight ticket" OR "airfare") (특가 OR 프로모션 OR 할인 OR "discount") -무인 -LIG -밀코르 -축구 -배달 -특급',
@@ -338,7 +363,7 @@ def create_pdf_bytes(data):
         bottomMargin=35
     )
     
-    content_width = A4[0] - 70 # 525pt
+    content_width = A4 - 70 # 525pt
 
     title_style = ParagraphStyle(
         'DocTitle', fontName='HYGothic-Medium', fontSize=18, leading=22,

@@ -40,7 +40,7 @@ def fetch_google_news_rss_realtime(query, max_hours=24):
                 if hasattr(entry, 'published_parsed') and entry.published_parsed:
                     pub_dt = datetime(*entry.published_parsed[:6], tzinfo=timezone.utc)
                     if now_utc - pub_dt > timedelta(hours=max_hours):
-                        continue  # 3~4일 전 지나간 소식 차단
+                        continue  # 24시간 초과 기사는 제외
                 
                 valid_entries.append(entry)
                 if len(valid_entries) >= 5:
@@ -87,7 +87,7 @@ def clean_text(text):
 def select_top_shorts_topics(data):
     """
     수집된 24시간 실시간 데이터 중 남아공-한국 국민에게 파급력(Impact)이 가장 큰
-    Shorts 제작 추천 주제 TOP 3 및 3초 Hook 멘트, 30초 대본 개요 자동 생성
+    Shorts 제작 추천 주제 TOP 3 및 정교해진 3초 Hook / 30초 대본 개요 생성
     """
     candidates = []
     
@@ -97,7 +97,7 @@ def select_top_shorts_topics(data):
             'category': '🚨 긴급/속보 파급',
             'title': item.title,
             'reason': '남아공 & 한국 국민의 안전/제도/삶에 직접 영향을 미치는 실시간 속보',
-            'hook': f'"잠깐! 남아공과 한국에서 지금 난리 난 이 소식, 알고 계셨나요?"',
+            'hook': '"잠깐! 남아공과 한국에서 지금 난리 난 이 소식, 알고 계셨나요?"',
             'script': '[0~3초] 속보 자막 & 멘트 → [3~20초] 24시간 내 발생 사건 핵심 요약 → [20~30초] "여러분의 생각은?" 댓글 유도'
         })
         
@@ -107,18 +107,18 @@ def select_top_shorts_topics(data):
             'category': '✈️ 파격 특가/혜택',
             'title': item.title,
             'reason': '양국 간 이동 비용 절감 및 실질적 혜택이 매우 높아 바이럴 유력',
-            'hook': f'"남아공-한국 비행기표 실화? 24시간 안에 나온 이 특가 혜택 놓치면 손해입니다!"',
+            'hook': '"남아공-한국 비행기표 실화? 24시간 안에 나온 이 특가 혜택 놓치면 손해입니다!"',
             'script': '[0~3초] 할인 금액 강조 → [3~20초] 프로모션 조건 및 일시 빠르게 전달 → [20~30초] "주변에 남아공 갈 사람 태그!"'
         })
         
-    # 3순위: 문화 교류 및 스포츠 매치 (대중적 열광 & 공감대)
+    # 3순위: 문화 교류 및 스포츠 매치 (양국 간 직접 연계된 이슈만)
     for item in data.get('exchanges', []) + data.get('sports', []):
         candidates.append({
             'category': '🌐 교류/스포츠 매치',
             'title': item.title,
-            'reason': '양국 대중이 동시에 주목하며 시청 지속 시간이 높은 이슈',
-            'hook': f'"남아공과 한국이 만났다! 양국 대중을 뜨겁게 달군 현장 공개!"',
-            'script': '[0~3초] 하이라이트 영상 → [3~20초] 주요 기사 내용 및 현지 반응 정리 → [20~30초] "누가 승자가 될까요?" 투표 유도'
+            'reason': '아프리카/남아공과 한국 간 대중적 관심도 및 시청 지속 시간이 높은 이슈',
+            'hook': '"아프리카와 한국이 만났다! 양국 대중을 뜨겁게 달군 실시간 현장 소식!"',
+            'script': '[0~3초] 현장/하이라이트 장면 → [3~20초] 주요 기사 내용 및 반응 정리 → [20~30초] "여러분의 의견을 댓글로 들려주세요!"'
         })
         
     # 4순위: 미식 축제 및 관광 혜택 (시각적 흥미)
@@ -127,7 +127,7 @@ def select_top_shorts_topics(data):
             'category': '🍷 미식/관광 페스티벌',
             'title': item.title,
             'reason': 'K-Food 및 남아공 특색이 살아있어 영상 제작 시 시각적 바이럴이 높은 소재',
-            'hook': f'"이 조합 미쳤다! 현지인들도 줄 서서 먹는 현장 바이럴 소식!"',
+            'hook': '"이 조합 미쳤다! 현지인들도 줄 서서 먹는 현장 바이럴 소식!"',
             'script': '[0~3초] 미식 클로즈업 → [3~20초] 페스티벌 및 인기 메뉴 3가지 소개 → [20~30초] "가장 먹고 싶은 것은?" 댓글 축제'
         })
         
@@ -174,23 +174,23 @@ def generate_report_data():
     breaking_query = '(남아공 OR 아프리카 OR "South Africa") (속보 OR 긴급 OR 특종 OR 사건 OR 사고 OR 비상 OR "breaking news") -축구 -게임'
     breaking_entries = fetch_google_news_rss_realtime(breaking_query)
     
-    # 2) ✈️ 24시간 이내 여객 항공 특가
+    # 2) ✈️ 24시간 이내 여객 항공 특가 (노이즈 엄격 제외)
     flight_query = '(남아공 OR "South Africa") (항공권 OR 비행기표 OR "flight ticket" OR "airfare") (특가 OR 프로모션 OR 할인 OR "discount") -무인 -LIG -밀코르 -축구 -배달 -특급'
     flight_entries = fetch_google_news_rss_realtime(flight_query)
     
-    # 3) 🌐 아프리카 ↔ 아시아/한국 문화 교류 행사
-    exchange_query = '((한국 OR 대한민국) 아프리카 (문화제 OR 교류 OR "cultural exchange")) OR ((남아공 OR "South Africa") (아시아 OR 한국) (행사 OR 축제 OR "festival")) -축구 -경기'
+    # 3) 🌐 아프리카 ↔ 아시아/한국 문화 교류 행사 (-아시안게임 노이즈 제거)
+    exchange_query = '((한국 OR 대한민국) (남아공 OR 아프리카) (문화제 OR 교류 OR "cultural exchange")) OR ((남아공 OR "South Africa") (한국 OR "Korea") (행사 OR 축제 OR "festival")) -아시안게임 -축구 -경기'
     exchange_entries = fetch_google_news_rss_realtime(exchange_query)
     
-    # 4) ⚽ 스포츠 빅매치
-    sports_query = '(아프리카 OR 남아공 OR "South Africa") (아시아 OR 한국 OR "Korea") (대표팀 OR 매치 OR "match" OR "tournament") (축구 OR 야구 OR 농구)'
+    # 4) ⚽ 스포츠 빅매치 (아프리카/남아공 ↔ 한국/아시아 직접 맞대결 기사만, -아시안게임 -유로 제외)
+    sports_query = '(아프리카 OR 남아공 OR "South Africa") (한국 OR 대한민국 OR "Korea") (맞대결 OR 평가전 OR 친선전 OR 대표팀 OR "vs") (축구 OR 농구 OR 야구) -아시안게임 -유로 -올림픽'
     sports_entries = fetch_google_news_rss_realtime(sports_query)
     
-    # 5) 🍷 미식 축제
+    # 5) 🍷 미식 축제 (K-Food & 남아공 미식 페스티벌)
     gastro_query = '("K-Food" OR 남아공 OR "South Africa") (미식 OR "gastro" OR "food festival") (축제 OR 페스티벌)'
     gastro_entries = fetch_google_news_rss_realtime(gastro_query)
     
-    # 6) 🏛️ MICE 행사
+    # 6) 🏛️ MICE 행사 (컨벤션, 박람회, 포럼)
     mice_query = '(남아공 OR 대한민국 OR 아프리카) (MICE OR 박람회 OR 컨벤션 OR 포럼 OR "exhibition")'
     mice_entries = fetch_google_news_rss_realtime(mice_query)
     
@@ -309,7 +309,7 @@ def create_pdf_bytes(data):
     story.append(Spacer(1, 3))
     
     # 3. 🌐 [문화/교류]
-    story.append(Paragraph("🌐 [문화/교류] 한국-아프리카 & 남아공-아시아 테마 행사 소식", h2_style))
+    story.append(Paragraph("🌐 [문화/교류] 한국-아프리카 & 남아공-한국 테마 행사 소식", h2_style))
     if data['exchanges']:
         for item in data['exchanges']:
             story.append(Paragraph(f"• <b>[교류행사]</b> {clean_text(item.title)}", body_style))
@@ -318,7 +318,7 @@ def create_pdf_bytes(data):
     story.append(Spacer(1, 3))
 
     # 4. ⚽ [스포츠]
-    story.append(Paragraph("⚽ [스포츠] 아프리카 ↔ 아시아/한국팀 24HR 매치 & 스포츠 이벤트", h2_style))
+    story.append(Paragraph("⚽ [스포츠] 아프리카 ↔ 한국 대표팀 24HR 매치 & 스포츠 이벤트", h2_style))
     if data['sports']:
         for item in data['sports']:
             story.append(Paragraph(f"• <b>[스포츠매치]</b> {clean_text(item.title)}", body_style))

@@ -1,6 +1,7 @@
 import os
 import sys
 from datetime import datetime
+from zoneinfo import ZoneInfo  # 표준 타임존 라이브러리 (Python 3.9+)
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaInMemoryUpload
@@ -8,10 +9,13 @@ from googleapiclient.http import MediaInMemoryUpload
 def generate_report():
     """
     일일 뉴스/마크다운 리포트를 생성하는 함수
-    (날짜 및 시분까지 포함하여 중복 생성 방지)
+    (한국 시간 KST 기준 타임스탬프 적용)
     """
-    now_str = datetime.now().strftime("%Y-%m-%d_%H%M")
-    content = f"# StariaPj Daily Report ({now_str})\n\n"
+    # 한국 시간(KST) 기준 날짜/시간 생성
+    now_kst = datetime.now(ZoneInfo("Asia/Seoul"))
+    now_str = now_kst.strftime("%Y-%m-%d_%H%M")
+    
+    content = f"# StariaPj Daily Report ({now_str} KST)\n\n"
     content += "## Today's Automation Summary\n"
     content += "- StariaPj Daily News Automation script ran successfully.\n"
     content += "- Generated via GitHub Actions and uploaded using Google Drive OAuth 2.0.\n"
@@ -25,17 +29,15 @@ def upload_to_gdrive(content, time_str):
 
     # 1. 필수 환경 변수 검증
     if not all([client_id, client_secret, refresh_token, folder_id]):
-        print("❌ 오류: Google Drive Secrets (CLIENT_ID, CLIENT_SECRET, REFRESH_TOKEN, FOLDER_ID) 중 일부가 누락되었습니다.")
+        print("❌ 오류: Google Drive Secrets 중 일부가 누락되었습니다.")
         sys.exit(1)
 
-    # 2. Folder ID 자동 정제 (URL 전체나 쿼리 스트링, 공백 입력 시 pure ID만 파싱)
+    # 2. Folder ID 자동 정제
     folder_id = folder_id.strip().rstrip('/')
     if '?' in folder_id:
-        folder_id = folder_id.split('?')[0]
+        folder_id = folder_id.split('?')
     if '/' in folder_id:
         folder_id = folder_id.split('/')[-1]
-
-    print(f"📁 Target Folder ID: {folder_id}")
 
     # 3. OAuth 2.0 Credentials 객체 생성
     creds = Credentials(
@@ -48,11 +50,9 @@ def upload_to_gdrive(content, time_str):
     )
 
     try:
-        # 4. Google Drive API 서비스 빌드 및 업로드
         service = build("drive", "v3", credentials=creds)
 
-        # 파일명에 시분(time_str) 추가
-        filename = f"StariaPj_Daily_Report_{time_str}.md"
+        filename = f"StariaPj_Daily_Report_{time_str}_KST.md"
         file_metadata = {
             "name": filename,
             "parents": [folder_id],

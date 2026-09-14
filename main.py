@@ -6,6 +6,7 @@ import requests
 import feedparser
 import urllib.parse
 import smtplib
+import email.utils
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.mime.application import MIMEApplication
@@ -100,7 +101,7 @@ def save_gdrive_cache(service, folder_id, cache_data):
         print(f"⚠️ 캐시 파일 저장 경고: {e}")
 
 def upload_json_to_gdrive(service, folder_id, cache_data, time_str):
-    """독립된 날짜별 JSON 데이터 파일(StariaPj_Daily_Data_YYYY-MM-DD_HHMM_KST.json) 구글 드라이브 추가 업로드"""
+    """독립된 날짜별 JSON 데이터 파일 구글 드라이브 추가 업로드"""
     if not service or not folder_id:
         return
     try:
@@ -158,8 +159,8 @@ def send_email_with_pdf(pdf_bytes, time_str, recipient_email="pj2gwk@gmail.com")
     except Exception as e:
         print(f"❌ 이메일 발송 오류: {e}")
 
-def fetch_google_news_rss_realtime(query):
-    """Google News RSS 최신 24시간 항목 수집"""
+def fetch_google_news_rss_realtime(query, max_hours=24):
+    """Google News RSS 최신 24시간 항목 수집 (엄격한 날짜 검증 적용)"""
     realtime_query = f"{query} when:1d"
     encoded_query = urllib.parse.quote(realtime_query)
     url = f"https://news.google.com/rss/search?q={encoded_query}&hl=ko&gl=KR&ceid=KR:ko"
@@ -170,16 +171,26 @@ def fetch_google_news_rss_realtime(query):
         if response.status_code == 200:
             feed = feedparser.parse(response.content)
             now_utc = datetime.now(timezone.utc)
+            cutoff_dt = now_utc - timedelta(hours=max_hours)
+            
             for entry in feed.entries:
-                pub_ts = now_utc.timestamp()
+                pub_dt = None
                 if hasattr(entry, 'published_parsed') and entry.published_parsed:
                     pub_dt = datetime(*entry.published_parsed[:6], tzinfo=timezone.utc)
-                    pub_ts = pub_dt.timestamp()
+                elif hasattr(entry, 'published') and entry.published:
+                    try:
+                        pub_dt = email.utils.parsedate_to_datetime(entry.published)
+                    except Exception:
+                        pub_dt = None
+                
+                # 날짜 검증 불가능하거나 24시간 초과 기사는 엄격히 제외
+                if not pub_dt or pub_dt < cutoff_dt:
+                    continue
                 
                 entries.append({
                     'title': entry.title,
                     'link': getattr(entry, 'link', ''),
-                    'pub_ts': pub_ts
+                    'pub_ts': pub_dt.timestamp()
                 })
     except Exception as e:
         print(f"⚠️ RSS 수집 경고 ({query}): {e}")
@@ -284,11 +295,12 @@ def generate_report_data(service, folder_id):
     old_cache = load_gdrive_cache(service, folder_id)
     new_cache = {}
     
+    # 과거 대표팀 및 구 연도 키워드 차단 (-홍명보 -히딩크 -벤투 -2010 -2012 -2014 -2018 -2022)
     queries = {
         'breaking': '(남아공 OR 아프리카 OR "South Africa") (속보 OR 긴급 OR 특종 OR 사건 OR 사고 OR 비상 OR "breaking news") -축구 -게임',
         'flights': '(남아공 OR "South Africa") (항공권 OR 비행기표 OR "flight ticket" OR "airfare") (특가 OR 프로모션 OR 할인 OR "discount") -무인 -LIG -밀코르 -축구 -배달 -특급',
         'exchanges': '((한국 OR 대한민국) (남아공 OR 아프리카) (문화제 OR 교류 OR "cultural exchange")) OR ((남아공 OR "South Africa") (한국 OR "Korea") (행사 OR 축제 OR "festival")) -아시안게임 -축구 -경기',
-        'sports': '(아프리카 OR 남아공 OR "South Africa") (한국 OR 대한민국 OR "Korea") (맞대결 OR 평가전 OR 친선전 OR 대표팀 OR "vs") (축구 OR 농구 OR 야구) -아시안게임 -유로 -올림픽',
+        'sports': '(아프리카 OR 남아공 OR "South Africa") (한국 OR 대한민국 OR "Korea") (맞대결 OR 평가전 OR 친선전 OR 대표팀 OR "vs") (축구 OR 농구 OR 야구) -아시안게임 -유로 -올림픽 -홍명보 -히딩크 -벤투 -2010 -2012 -2014 -2018 -2022',
         'festivals': '("K-Food" OR 남아공 OR "South Africa") (미식 OR "gastro" OR "food festival") (축제 OR 페스티벌)',
         'mice': '(남아공 OR 대한민국 OR 아프리카) (MICE OR 박람회 OR 컨벤션 OR 포럼 OR "exhibition")',
         'promotions': '(남아공 OR 대한민국 OR 아프리카) (관광 OR "tourism") (프로모션 OR 이벤트 OR 할인 OR 무료) -배달'
@@ -328,7 +340,6 @@ def create_pdf_bytes(data):
     
     content_width = A4[0] - 70 # 525pt
 
-    # 스타일 정의
     title_style = ParagraphStyle(
         'DocTitle', fontName='HYGothic-Medium', fontSize=18, leading=22,
         textColor=colors.HexColor('#1A202C'), spaceAfter=4
@@ -338,7 +349,6 @@ def create_pdf_bytes(data):
         textColor=colors.HexColor('#718096'), spaceAfter=10
     )
     
-    # Shorts 카드의 텍스트 스타일
     card_title_style = ParagraphStyle(
         'CardTitle', fontName='HYGothic-Medium', fontSize=10, leading=14,
         textColor=colors.HexColor('#2D3748')
@@ -356,7 +366,6 @@ def create_pdf_bytes(data):
         textColor=colors.HexColor('#2B6CB0')
     )
 
-    # 섹션 본문 스타일
     tag_style = ParagraphStyle(
         'TagStyle', fontName='HYGothic-Medium', fontSize=9, leading=13,
         textColor=colors.HexColor('#2B6CB0')
@@ -376,12 +385,10 @@ def create_pdf_bytes(data):
 
     story = []
     
-    # 1. 헤더 영역
     story.append(Paragraph("StariaPj 온타임 24시간 긴급속보 &amp; Shorts 제작 리포트", title_style))
     story.append(Paragraph(f"발행 일시: {data['now_kst_str']} (KST) | 최근 24시간 유효 소식 및 숏츠 대본 가이드", subtitle_style))
     story.append(HRFlowable(width="100%", thickness=2, color=colors.HexColor('#5A67D8'), spaceAfter=12))
     
-    # 2. 🎬 Shorts 추천 TOP 3 (강조 콜아웃 카드 레이아웃)
     shorts_header_p = Paragraph("<font color='#5A67D8'><b>🎬 [필수 제작] 지금 당장 쇼츠(Shorts)로 만들어야 하는 주제 TOP 3</b></font>", ParagraphStyle('SH', fontName='HYGothic-Medium', fontSize=11, leading=15))
     sh_table = Table([[shorts_header_p]], colWidths=[content_width])
     sh_table.setStyle(TableStyle([
@@ -431,7 +438,6 @@ def create_pdf_bytes(data):
     story.append(Spacer(1, 8))
     story.append(HRFlowable(width="100%", thickness=0.8, color=colors.HexColor('#E2E8F0'), spaceAfter=10))
     
-    # Helper: 섹션 헤더 바 생성 함수
     def create_section_bar(title_text, is_alert=False):
         accent_color = '#E53E3E' if is_alert else '#3182CE'
         bg_color = '#FFF5F5' if is_alert else '#EBF8FF'
@@ -488,7 +494,6 @@ def create_pdf_bytes(data):
             story.append(Paragraph("• 최근 24시간 이내 등록되거나 유효한 소식이 없습니다.", empty_style))
         story.append(Spacer(1, 6))
 
-    # 8. 유튜브 미디어 화제성
     if data['yt_videos']:
         story.append(Spacer(1, 2))
         story.append(create_section_bar("▶️ [YouTube 24HR 바이럴 영상]", False))
@@ -552,14 +557,7 @@ if __name__ == "__main__":
     report_data = generate_report_data(service, folder_id)
     pdf_bytes = create_pdf_bytes(report_data)
     
-    # 1. 구글 드라이브 PDF 업로드
     upload_to_gdrive(service, folder_id, pdf_bytes, report_data['time_str'])
-    
-    # 2. 구글 드라이브 독립 JSON 업로드
     upload_json_to_gdrive(service, folder_id, report_data['new_cache'], report_data['time_str'])
-    
-    # 3. 최신 캐시 파일(latest_news_cache.json) 갱신
     save_gdrive_cache(service, folder_id, report_data['new_cache'])
-    
-    # 4. pj2gwk@gmail.com 으로 PDF 리포트 자동 발송
     send_email_with_pdf(pdf_bytes, report_data['time_str'], recipient_email="pj2gwk@gmail.com")

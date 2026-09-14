@@ -18,7 +18,7 @@ from reportlab.pdfbase.cidfonts import UnicodeCIDFont
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, HRFlowable
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 
-# 1. ReportLab 내장 한글 폰트 등록 (한글 깨짐 방지)
+# 1. ReportLab 내장 한글 폰트 등록
 pdfmetrics.registerFont(UnicodeCIDFont('HYGothic-Medium'))
 pdfmetrics.registerFont(UnicodeCIDFont('HYSMyeongJo-Medium'))
 
@@ -71,7 +71,7 @@ def load_gdrive_cache(service, folder_id):
 
 def save_gdrive_cache(service, folder_id, cache_data):
     """
-    이번에 수집/유지된 최신 24시간 소식을 구글 드라이브 캐시(latest_news_cache.json)로 저장
+    이번에 수집/유지된 최신 24시간 소식을 구글 드라이브 캐시(latest_news_cache.json)로 갱신 저장
     """
     if not service or not folder_id:
         return
@@ -95,12 +95,33 @@ def save_gdrive_cache(service, folder_id, cache_data):
                 "mimeType": "application/json"
             }
             service.files().create(body=file_metadata, media_body=media, fields="id").execute()
-        print("✅ 구글 드라이브 뉴스 이월 캐시(latest_news_cache.json) 동기화 완료!")
+        print("✅ 구글 드라이브 최신 데이터 캐시(latest_news_cache.json) 동기화 완료!")
     except Exception as e:
         print(f"⚠️ 캐시 파일 저장 경고: {e}")
 
+def upload_json_to_gdrive(service, folder_id, cache_data, time_str):
+    """
+    독립된 날짜별 JSON 데이터 파일(StariaPj_Daily_Data_YYYY-MM-DD_HHMM_KST.json) 구글 드라이브 추가 업로드
+    """
+    if not service or not folder_id:
+        return
+    try:
+        filename = f"StariaPj_Daily_Data_{time_str}_KST.json"
+        json_bytes = json.dumps(cache_data, ensure_ascii=False, indent=2).encode('utf-8')
+        media = MediaInMemoryUpload(json_bytes, mimetype="application/json", resumable=True)
+        
+        file_metadata = {
+            "name": filename,
+            "parents": [folder_id],
+            "mimeType": "application/json"
+        }
+        file = service.files().create(body=file_metadata, media_body=media, fields="id").execute()
+        print(f"✅ Google Drive 독립 JSON 데이터 파일 업로드 성공! (파일명: {filename}, ID: {file.get('id')})")
+    except Exception as e:
+        print(f"⚠️ JSON 데이터 파일 업로드 실패: {e}")
+
 def fetch_google_news_rss_realtime(query):
-    """Google News RSS 최신 24시간 항목 1차 수집"""
+    """Google News RSS 최신 24시간 항목 수집"""
     realtime_query = f"{query} when:1d"
     encoded_query = urllib.parse.quote(realtime_query)
     url = f"https://news.google.com/rss/search?q={encoded_query}&hl=ko&gl=KR&ceid=KR:ko"
@@ -154,39 +175,32 @@ def fetch_youtube_buzz(query, youtube_api_key):
 
 def merge_and_filter_entries(new_entries, cached_entries, max_hours=24):
     """
-    24시간 이내 소식 이월 유지 로직:
-    신규 수집 데이터와 직전 소식지 캐시 데이터를 병합하여 24시간 이내 소식을 유지
+    24시간 이내 소식 이월 유지 로직
     """
     now_ts = datetime.now(timezone.utc).timestamp()
     cutoff_ts = now_ts - (max_hours * 3600)
     
     combined_dict = {}
     
-    # 1. 24시간 미만 유효한 캐시 항목 이월
     for c in cached_entries:
         if c.get('pub_ts', 0) >= cutoff_ts:
             combined_dict[c['title']] = c
             
-    # 2. 이번에 새로 들어온 신규 기사 추가/갱신
     for n in new_entries:
         if n.get('pub_ts', 0) >= cutoff_ts:
             combined_dict[n['title']] = n
             
-    # 최신순 정렬 후 최대 5개 유지
     sorted_items = sorted(combined_dict.values(), key=lambda x: x['pub_ts'], reverse=True)
     return sorted_items[:5]
 
 def clean_text(text):
-    """ReportLab XML 파싱 오류 방지를 위한 태그 처리"""
+    """ReportLab XML 파싱 오류 방지"""
     if not text:
         return ""
     return text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
 
 def select_top_shorts_topics(data):
-    """
-    실제 소식지에 들어간 데이터 중에서만 파급력 순으로 Shorts TOP 3 선별.
-    (기본 템플릿/가짜 데이터는 일절 넣지 않음)
-    """
+    """실제 소식지 내 수집 데이터로만 파급력 순 Shorts TOP 3 선별"""
     candidates = []
     seen_titles = set()
     
@@ -224,19 +238,16 @@ def select_top_shorts_topics(data):
                    '"이 조합 미쳤다! 현지인들도 줄 서서 먹는 현장 바이럴 소식!"',
                    '[0~3초] 미식 클로즈업 → [3~20초] 페스티벌 및 인기 메뉴 3가지 소개 → [20~30초] "가장 먹고 싶은 것은?" 댓글 축제')
 
-    # 수집된 정보 내에서만 최대 3개 리턴 (부족하면 있는 만큼만, 없으면 빈 리스트)
     return candidates[:3]
 
 def generate_report_data(service, folder_id):
-    """데이터 수집, 이전 소식지 24시간 이월 캐시 병합"""
+    """데이터 수집 및 이월 캐시 병합"""
     now_kst = datetime.now(ZoneInfo("Asia/Seoul"))
     time_str = now_kst.strftime("%Y-%m-%d_%H%M")
     
-    # 구글 드라이브 캐시 로드
     old_cache = load_gdrive_cache(service, folder_id)
     new_cache = {}
     
-    # 쿼리 정의 및 수집
     queries = {
         'breaking': '(남아공 OR 아프리카 OR "South Africa") (속보 OR 긴급 OR 특종 OR 사건 OR 사고 OR 비상 OR "breaking news") -축구 -게임',
         'flights': '(남아공 OR "South Africa") (항공권 OR 비행기표 OR "flight ticket" OR "airfare") (특가 OR 프로모션 OR 할인 OR "discount") -무인 -LIG -밀코르 -축구 -배달 -특급',
@@ -262,14 +273,13 @@ def generate_report_data(service, folder_id):
     youtube_api_key = os.environ.get("YOUTUBE_API_KEY", "")
     report_data['yt_videos'] = fetch_youtube_buzz("South Africa Korea travel flight deals food festival", youtube_api_key)
     
-    # 실제 소식지 포함 내용 안에서만 Shorts TOP 3 선별
     report_data['shorts_top3'] = select_top_shorts_topics(report_data)
     report_data['new_cache'] = new_cache
     
     return report_data
 
 def create_pdf_bytes(data):
-    """PDF 리포트 바이너리 생성"""
+    """PDF 리포트 생성"""
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(
         buffer,
@@ -315,12 +325,10 @@ def create_pdf_bytes(data):
 
     story = []
     
-    # 헤더
     story.append(Paragraph("StariaPj 온타임 24시간 긴급속보 & Shorts 제작 리포트", title_style))
     story.append(Paragraph(f"발행 일시: {data['now_kst_str']} (KST) | 최근 24시간 유효 소식 및 Shorts 추천", subtitle_style))
     story.append(HRFlowable(width="100%", thickness=1.5, color=colors.HexColor('#6B46C1'), spaceAfter=10))
     
-    # 🎬 Shorts 추천 주제 TOP 3 (소식지 실제 수집 내용 기반만)
     story.append(Paragraph("🎬 [필수 제작] 지금 당장 쇼츠(Shorts)로 만들어야 하는 주제 TOP 3", shorts_h2_style))
     if data['shorts_top3']:
         for idx, item in enumerate(data['shorts_top3'], 1):
@@ -340,7 +348,6 @@ def create_pdf_bytes(data):
     story.append(Spacer(1, 4))
     story.append(HRFlowable(width="100%", thickness=0.8, color=colors.HexColor('#CBD5E0'), spaceAfter=8))
     
-    # 각 섹션 출력 (이전 소식 이월 적용)
     sections = [
         ('breaking', '🚨 [실시간 긴급 속보] 남아공 · 아프리카 · 한국 관련 주요 사건/사고', True),
         ('flights', '✈️ [항공 특가] 한국 ↔ 남아공 24HR 특가 항공권 & 프로모션', True),
@@ -363,7 +370,6 @@ def create_pdf_bytes(data):
             story.append(Paragraph("• 최근 24시간 이내 등록되거나 유효한 소식이 없습니다.", empty_style))
         story.append(Spacer(1, 3))
 
-    # 유튜브 미디어 화제성
     if data['yt_videos']:
         story.append(Spacer(1, 3))
         story.append(Paragraph("▶️ [YouTube 24HR 바이럴 영상]", h2_style))
@@ -405,12 +411,19 @@ def upload_to_gdrive(service, folder_id, pdf_bytes, time_str):
 if __name__ == "__main__":
     folder_id = os.environ.get("GDRIVE_FOLDER_ID", "").strip().rstrip('/')
     if '?' in folder_id:
-        folder_id = folder_id.split('?')[0]
+        folder_id = folder_id.split('?')
     if '/' in folder_id:
         folder_id = folder_id.split('/')[-1]
 
     service = get_gdrive_service()
     report_data = generate_report_data(service, folder_id)
     pdf_bytes = create_pdf_bytes(report_data)
+    
+    # 1. PDF 리포트 파일 업로드
     upload_to_gdrive(service, folder_id, pdf_bytes, report_data['time_str'])
+    
+    # 2. 독립된 JSON 데이터 파일 업로드 (StariaPj_Daily_Data_YYYY-MM-DD_HHMM_KST.json)
+    upload_json_to_gdrive(service, folder_id, report_data['new_cache'], report_data['time_str'])
+    
+    # 3. 이월용 최신 캐시 파일(latest_news_cache.json) 갱신
     save_gdrive_cache(service, folder_id, report_data['new_cache'])

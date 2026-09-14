@@ -3,7 +3,8 @@ import os
 import sys
 import requests
 import feedparser
-from datetime import datetime
+import urllib.parse
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
@@ -16,37 +17,57 @@ from reportlab.pdfbase.cidfonts import UnicodeCIDFont
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, HRFlowable
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 
-# 1. ReportLab 내장 한글 폰트 등록
+# 1. ReportLab 내장 한글 폰트 등록 (깨짐 방지)
 pdfmetrics.registerFont(UnicodeCIDFont('HYGothic-Medium'))
 pdfmetrics.registerFont(UnicodeCIDFont('HYSMyeongJo-Medium'))
 
-def fetch_google_news_rss(query):
+def fetch_google_news_rss_realtime(query, max_hours=24):
     """
-    Google News RSS를 5초 타임아웃으로 안전하게 파싱 (무장애 수집)
+    Google News RSS에서 최근 24시간 이내 발행된 '실시간(On-Time)' 최신 기사만 파싱
     """
-    url = f"https://news.google.com/rss/search?q={query}&hl=ko&gl=KR&ceid=KR:ko"
+    # 1차 필터링: 검색어에 'when:1d' 결합 (최근 24시간 이내 기사)
+    realtime_query = f"{query} when:1d"
+    encoded_query = urllib.parse.quote(realtime_query)
+    url = f"https://news.google.com/rss/search?q={encoded_query}&hl=ko&gl=KR&ceid=KR:ko"
+    
     try:
         response = requests.get(url, timeout=5)
         if response.status_code == 200:
             feed = feedparser.parse(response.content)
-            return feed.entries[:5]
+            valid_entries = []
+            now_utc = datetime.now(timezone.utc)
+            
+            for entry in feed.entries:
+                # 2차 검증: 실제 발행 시각(published_parsed) 기준 24시간 초과 기사는 차단
+                if hasattr(entry, 'published_parsed') and entry.published_parsed:
+                    pub_dt = datetime(*entry.published_parsed[:6], tzinfo=timezone.utc)
+                    if now_utc - pub_dt > timedelta(hours=max_hours):
+                        continue  # 3~4일 전 구형 기사 자동 패스
+                
+                valid_entries.append(entry)
+                if len(valid_entries) >= 5:
+                    break
+            return valid_entries
     except Exception as e:
-        print(f"⚠️ RSS 수집 경고 (키워드: {query}): {e}")
+        print(f"⚠️ RSS 실시간 수집 경고 (키워드: {query}): {e}")
     return []
 
 def fetch_youtube_buzz(query, youtube_api_key):
     """
-    YouTube Data API를 활용한 영상 조회수/화제성 지수 산출 (선택사항)
+    YouTube Data API를 활용한 최근 24시간 바이럴 영상 반응 수집
     """
     if not youtube_api_key:
         return []
     
     url = "https://www.googleapis.com/youtube/v3/search"
+    published_after = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
+    
     params = {
         'part': 'snippet',
         'q': query,
         'type': 'video',
-        'order': 'viewCount',
+        'order': 'date',
+        'publishedAfter': published_after,
         'maxResults': 3,
         'key': youtube_api_key
     }
@@ -56,53 +77,58 @@ def fetch_youtube_buzz(query, youtube_api_key):
             data = res.json()
             return data.get('items', [])
     except Exception as e:
-        print(f"⚠️ YouTube API 호출 중 경고: {e}")
+        print(f"⚠️ YouTube API 호출 경고: {e}")
     return []
 
 def clean_text(text):
-    """ReportLab XML 파싱 오류 방지를 위한 태그 처리"""
+    """ReportLab XML 파싱 오류 방지를 위한 태그 특수문자 치환"""
     if not text:
         return ""
     return text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
 
 def generate_report_data():
     """
-    요청된 7개 세부 키워드별 데이터 수집 및 조합
+    최근 24시간 이내 실시간(On-time) 특종/사고/특가/이벤트 데이터 수집
     """
     now_kst = datetime.now(ZoneInfo("Asia/Seoul"))
     time_str = now_kst.strftime("%Y-%m-%d_%H%M")
     
-    # 1) 항공 특가 (남아공발 한국행 & 한국발 남아공행)
-    flight_query = '(남아공 OR "South Africa") (한국 OR "Korea" OR 서울) (항공권 OR 항공 OR 특가 OR 프로모션 OR "flight")'
-    flight_entries = fetch_google_news_rss(flight_query)
+    # 1) 🚨 실시간 긴급 속보 (사건/사고/비상)
+    breaking_query = '(남아공 OR 아프리카 OR "South Africa") (속보 OR 긴급 OR 특종 OR 사건 OR 사고 OR 비상 OR "breaking news") -축구 -게임'
+    breaking_entries = fetch_google_news_rss_realtime(breaking_query)
     
-    # 2) 아프리카 ↔ 아시아/한국 주제 교류 행사 (한국 내 아프리카 행사 & 남아공 내 아시아 행사)
-    exchange_query = '((한국 OR 대한민국) 아프리카 (행사 OR 축제 OR 문화제)) OR ((남아공 OR "South Africa") (아시아 OR "Asia" OR 한국) (행사 OR 축제 OR "festival"))'
-    exchange_entries = fetch_google_news_rss(exchange_query)
+    # 2) ✈️ 24시간 이내 여객 항공 특가 (군사/무인항공/스포츠/배달 노이즈 제거)
+    flight_query = '(남아공 OR "South Africa") (항공권 OR 비행기표 OR "flight ticket" OR "airfare") (특가 OR 프로모션 OR 할인 OR "discount") -무인 -LIG -밀코르 -축구 -배달 -특급'
+    flight_entries = fetch_google_news_rss_realtime(flight_query)
     
-    # 3) 스포츠 빅매치 (아프리카팀 ↔ 아시아/한국팀 경합 이벤트)
-    sports_query = '(아프리카 OR 남아공 OR "South Africa") (아시아 OR 한국 OR "Korea") (축구 OR 야구 OR 농구 OR 매치 OR "match" OR "tournament" OR 경기)'
-    sports_entries = fetch_google_news_rss(sports_query)
+    # 3) 🌐 아프리카 ↔ 아시아/한국 문화 교류 행사
+    exchange_query = '((한국 OR 대한민국) 아프리카 (문화제 OR 교류 OR "cultural exchange")) OR ((남아공 OR "South Africa") (아시아 OR 한국) (행사 OR 축제 OR "festival")) -축구 -경기'
+    exchange_entries = fetch_google_news_rss_realtime(exchange_query)
     
-    # 4) 미식 축제 (K-Food 미식 축제 & 남아공 South Africa 미식 축제)
-    gastro_query = '("K-Food" OR 남아공 OR "South Africa") (미식 OR 푸드 OR "food festival" OR "gastronomy") (축제 OR 페스티벌)'
-    gastro_entries = fetch_google_news_rss(gastro_query)
+    # 4) ⚽ 스포츠 빅매치 (아프리카팀 ↔ 아시아/한국 대표팀)
+    sports_query = '(아프리카 OR 남아공 OR "South Africa") (아시아 OR 한국 OR "Korea") (대표팀 OR 매치 OR "match" OR "tournament") (축구 OR 야구 OR 농구)'
+    sports_entries = fetch_google_news_rss_realtime(sports_query)
     
-    # 5) MICE 행사 (컨벤션, 박람회, 포럼)
+    # 5) 🍷 미식 축제 (K-Food & 남아공 South Africa 미식 페스티벌)
+    gastro_query = '("K-Food" OR 남아공 OR "South Africa") (미식 OR "gastro" OR "food festival") (축제 OR 페스티벌)'
+    gastro_entries = fetch_google_news_rss_realtime(gastro_query)
+    
+    # 6) 🏛️ MICE 행사 (컨벤션, 박람회, 포럼)
     mice_query = '(남아공 OR 대한민국 OR 아프리카) (MICE OR 박람회 OR 컨벤션 OR 포럼 OR "exhibition")'
-    mice_entries = fetch_google_news_rss(mice_query)
+    mice_entries = fetch_google_news_rss_realtime(mice_query)
     
-    # 6) 기타 관광 프로모션 및 이벤트 혜택
-    promo_query = '(남아공 OR 대한민국 OR 아프리카) (관광 OR 프로모션 OR 이벤트 OR 할인 OR 무료)'
-    promo_entries = fetch_google_news_rss(promo_query)
+    # 7) 🎁 관광 프로모션 및 혜택
+    promo_query = '(남아공 OR 대한민국 OR 아프리카) (관광 OR "tourism") (프로모션 OR 이벤트 OR 할인 OR 무료) -배달'
+    promo_entries = fetch_google_news_rss_realtime(promo_query)
     
-    # 7) YouTube 화제성 수집
+    # 8) YouTube 최근 24시간 실시간 트렌드
     youtube_api_key = os.environ.get("YOUTUBE_API_KEY", "")
-    yt_videos = fetch_youtube_buzz("South Africa Korea tourism food festival sports", youtube_api_key)
+    yt_videos = fetch_youtube_buzz("South Africa Korea travel flight deals food festival", youtube_api_key)
     
     return {
         'time_str': time_str,
         'now_kst_str': now_kst.strftime('%Y-%m-%d %H:%M:%S'),
+        'breaking': breaking_entries,
         'flights': flight_entries,
         'exchanges': exchange_entries,
         'sports': sports_entries,
@@ -114,7 +140,7 @@ def generate_report_data():
 
 def create_pdf_bytes(data):
     """
-    카테고리별 특보 및 트렌드가 반영된 PDF 생성
+    실시간(On-time) 24시간 특보 반영 PDF 바이너리 생성
     """
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(
@@ -146,71 +172,84 @@ def create_pdf_bytes(data):
         'AlertCustom', fontName='HYGothic-Medium', fontSize=9, leading=13,
         textColor=colors.HexColor('#C53030'), spaceAfter=4
     )
+    empty_style = ParagraphStyle(
+        'EmptyCustom', fontName='HYSMyeongJo-Medium', fontSize=8.5, leading=12,
+        textColor=colors.HexColor('#718096'), spaceAfter=4
+    )
 
     story = []
     
     # 헤더
-    story.append(Paragraph("StariaPj 일일 핫이슈 & Tourism/Sports/MICE 특보", title_style))
-    story.append(Paragraph(f"발행 일시: {data['now_kst_str']} (KST) | 양국 교류·미식·스포츠·MICE 통합 트래킹", subtitle_style))
-    story.append(HRFlowable(width="100%", thickness=1.5, color=colors.HexColor('#3182CE'), spaceAfter=8))
+    story.append(Paragraph("StariaPj 온타임 24시간 긴급속보 & 트렌드 리포트", title_style))
+    story.append(Paragraph(f"발행 일시: {data['now_kst_str']} (KST) | 최근 24시간 이내 실시간(On-Time) 수집 전용", subtitle_style))
+    story.append(HRFlowable(width="100%", thickness=1.5, color=colors.HexColor('#E53E3E'), spaceAfter=8))
     
-    # 1. ✈️ [항공 특가] 한국 ↔ 남아공 양방향 특가 항공권
-    story.append(Paragraph("✈️ [항공 특가] 한국 ↔ 남아공 특가 항공권 & 프로모션", h2_style))
+    # 1. 🚨 [실시간 긴급 속보]
+    story.append(Paragraph("🚨 [실시간 긴급 속보] 남아공 · 아프리카 · 한국 관련 주요 사건/사고", h2_style))
+    if data['breaking']:
+        for item in data['breaking']:
+            story.append(Paragraph(f"• <b>[속보]</b> {clean_text(item.title)}", alert_style))
+    else:
+        story.append(Paragraph("• 최근 24시간 이내 감지된 신규 긴급 속보가 없습니다. (정상 모니터링 중)", empty_style))
+    story.append(Spacer(1, 3))
+
+    # 2. ✈️ [항공 특가]
+    story.append(Paragraph("✈️ [항공 특가] 한국 ↔ 남아공 24HR 신규 특가 항공권 & 프로모션", h2_style))
     if data['flights']:
         for item in data['flights']:
             story.append(Paragraph(f"• <b>[특가소식]</b> {clean_text(item.title)}", alert_style))
     else:
-        story.append(Paragraph("• 실시간 탐색된 신규 대형 항공권 특가 소식이 업데이트 대기 중입니다.", body_style))
+        story.append(Paragraph("• 최근 24시간 이내 신규 등록된 대형 항공권 특가가 없습니다.", empty_style))
     story.append(Spacer(1, 3))
     
-    # 2. 🌐 [문화 교류] 한국 내 아프리카 행사 & 남아공 내 아시아 행사
-    story.append(Paragraph("🌐 [문화/교류] 한국-아프리카 & 남아공-아시아 테마 행사", h2_style))
+    # 3. 🌐 [문화/교류]
+    story.append(Paragraph("🌐 [문화/교류] 한국-아프리카 & 남아공-아시아 테마 행사 소식", h2_style))
     if data['exchanges']:
         for item in data['exchanges']:
             story.append(Paragraph(f"• <b>[교류행사]</b> {clean_text(item.title)}", body_style))
     else:
-        story.append(Paragraph("• 수집된 교류 행사를 파싱하고 있습니다.", body_style))
+        story.append(Paragraph("• 최근 24시간 이내 업데이트된 신규 교류 행사가 없습니다.", empty_style))
     story.append(Spacer(1, 3))
 
-    # 3. ⚽ [스포츠] 아프리카팀 vs 아시아/한국팀 주요 경합 소식
-    story.append(Paragraph("⚽ [스포츠] 아프리카 ↔ 아시아/한국팀 빅매치 & 스포츠 이벤트", h2_style))
+    # 4. ⚽ [스포츠]
+    story.append(Paragraph("⚽ [스포츠] 아프리카 ↔ 아시아/한국팀 24HR 매치 & 스포츠 이벤트", h2_style))
     if data['sports']:
         for item in data['sports']:
             story.append(Paragraph(f"• <b>[스포츠매치]</b> {clean_text(item.title)}", body_style))
     else:
-        story.append(Paragraph("• 최근 감지된 양 대륙 간 주요 스포츠 경기 이슈를 파싱 중입니다.", body_style))
+        story.append(Paragraph("• 최근 24시간 이내 발생한 주요 스포츠 경기 이슈가 없습니다.", empty_style))
     story.append(Spacer(1, 3))
 
-    # 4. 🍷 [미식 축제] K-Food & 남아공 South Africa 미식 축제
+    # 5. 🍷 [미식 축제]
     story.append(Paragraph("🍷 [미식 축제] K-Food & 남아공 South Africa 미식 페스티벌", h2_style))
     if data['festivals']:
         for item in data['festivals']:
             story.append(Paragraph(f"• <b>[미식/축제]</b> {clean_text(item.title)}", body_style))
     else:
-        story.append(Paragraph("• 진행 중인 미식 축제 트렌드를 수집 중입니다.", body_style))
+        story.append(Paragraph("• 최근 24시간 이내 수집된 신규 미식 축제 소식이 없습니다.", empty_style))
     story.append(Spacer(1, 3))
     
-    # 5. 🏛️ [MICE] 주요 MICE 행사 & 박람회/컨벤션
+    # 6. 🏛️ [MICE]
     story.append(Paragraph("🏛️ [MICE & 컨벤션] 주요 MICE 행사 및 국제 박람회 소식", h2_style))
     if data['mice']:
         for item in data['mice']:
             story.append(Paragraph(f"• <b>[MICE/박람회]</b> {clean_text(item.title)}", body_style))
     else:
-        story.append(Paragraph("• 관련 MICE 및 포럼 최신 소식이 트래킹 중입니다.", body_style))
+        story.append(Paragraph("• 최근 24시간 이내 신규 MICE 공시가 없습니다.", empty_style))
     story.append(Spacer(1, 3))
     
-    # 6. 🎁 [관광 혜택] 남아공 & 한국 특별 이벤트 및 혜택
+    # 7. 🎁 [관광 혜택]
     story.append(Paragraph("🎁 [관광 혜택] 한국 · 남아공 관광 이벤트 및 할인 혜택", h2_style))
     if data['promotions']:
         for item in data['promotions']:
             story.append(Paragraph(f"• <b>[이벤트/혜택]</b> {clean_text(item.title)}", body_style))
     else:
-        story.append(Paragraph("• 신규 관광 프로모션을 파싱 중입니다.", body_style))
+        story.append(Paragraph("• 최근 24시간 이내 발표된 신규 관광 이벤트가 없습니다.", empty_style))
 
-    # 7. 유튜브 미디어 화제성
+    # 8. 유튜브 미디어 화제성
     if data['yt_videos']:
         story.append(Spacer(1, 3))
-        story.append(Paragraph("▶️ [YouTube 미디어 화제성]", h2_style))
+        story.append(Paragraph("▶️ [YouTube 24HR 바이럴 영상]", h2_style))
         for vid in data['yt_videos']:
             v_title = vid['snippet']['title']
             story.append(Paragraph(f"• <b>[Shorts/Video]</b> {clean_text(v_title)}", body_style))
@@ -231,7 +270,7 @@ def upload_to_gdrive(pdf_bytes, time_str):
 
     folder_id = folder_id.strip().rstrip('/')
     if '?' in folder_id:
-        folder_id = folder_id.split('?')
+        folder_id = folder_id.split('?')[0]
     if '/' in folder_id:
         folder_id = folder_id.split('/')[-1]
 
@@ -272,11 +311,3 @@ if __name__ == "__main__":
     report_data = generate_report_data()
     pdf_bytes = create_pdf_bytes(report_data)
     upload_to_gdrive(pdf_bytes, report_data['time_str'])
-
-#새롭게 추가된 카테고리 요약
-#✈️ [항공 특가]: 남아공발 한국행 & 한국발 남아공행 특가 프로모션 뉴스 (최상단 빨간색 강조)
-#🌐 [문화/교류]: 한국 내 아프리카 테마 행사 & 남아공 내 아시아 테마 행사
-#⚽ [스포츠]: 아프리카팀 vs 아시아/한국팀 주요 스포츠 경기 및 빅매치
-#🍷 [미식 축제]: K-Food 미식 축제 & 남아공 South Africa 푸드 페스티벌
-#🏛️ [MICE & 컨벤션]: 국제 박람회, 컨벤션, 포럼 소식
-#🎁 [관광 혜택]: 한국·남아공 무료/할인 이벤트 소식

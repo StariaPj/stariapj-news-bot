@@ -99,7 +99,6 @@ def decode_google_news_url(url, title=""):
     except Exception:
         pass
         
-    # 구글 뉴스 리다이렉트 링크가 해독되지 않을 경우 구글 직접 검색 링크로 전환 (먹통 방지)
     if title:
         return f"https://www.google.com/search?q={urllib.parse.quote(title)}"
     return url
@@ -136,7 +135,7 @@ def load_gdrive_cache(service, folder_id):
         if not files:
             return {}
         
-        file_id = files[0]['id'] # ⭕ 리스트 첫 번째 요소 인덱싱
+        file_id = files[0]['id']
         request = service.files().get_media(fileId=file_id)
         fh = io.BytesIO()
         downloader = MediaIoBaseDownload(fh, request)
@@ -164,7 +163,7 @@ def save_gdrive_cache(service, folder_id, cache_data):
         files = results.get('files', [])
         
         if files:
-            file_id = files[0]['id'] # ⭕ 리스트 첫 번째 요소 인덱싱
+            file_id = files[0]['id']
             service.files().update(fileId=file_id, media_body=media).execute()
         else:
             file_metadata = {
@@ -568,7 +567,7 @@ def create_pdf_bytes(data):
         bottomMargin=35
     )
     
-    content_width = A4[0] - 70 # ⭕ A4[0] = 595.27pt, 595.27 - 70 = 525.27pt
+    content_width = A4[0] - 70
 
     title_style = ParagraphStyle(
         'DocTitle', fontName='HYGothic-Medium', fontSize=18, leading=22,
@@ -797,7 +796,7 @@ def upload_to_gdrive(service, folder_id, pdf_bytes, time_str):
 if __name__ == "__main__":
     folder_id = os.environ.get("GDRIVE_FOLDER_ID", "").strip().rstrip('/')
     if '?' in folder_id:
-        folder_id = folder_id.split('?')
+        folder_id = folder_id.split('?')[0]
     if '/' in folder_id:
         folder_id = folder_id.split('/')[-1]
 
@@ -809,4 +808,4 @@ if __name__ == "__main__":
     upload_json_to_gdrive(service, folder_id, report_data['new_cache'], report_data['time_str'])
     save_gdrive_cache(service, folder_id, report_data['new_cache'])
     # 본인, 아내, 아들 세 분께 동시 발송
-    send_email_with_pdf(pdf_bytes, report_data, recipients=["pj2gwk@gmail.com"]
+    send_email_with_pdf(pdf_bytes, report_data, recipients=["pj2gwk@gmail.com"])

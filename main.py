@@ -145,8 +145,28 @@ def upload_json_to_gdrive(service, folder_id, cache_data, time_str):
     except Exception as e:
         print(f"⚠️ JSON 데이터 파일 업로드 실패: {e}")
 
+def resolve_real_url(url):
+    """구글 뉴스 RSS 경유 링크를 언론사 원본 직접 주소로 자동 변환"""
+    if not url or url == '#':
+        return '#'
+    if 'news.google.com' not in url:
+        return url
+    try:
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        }
+        resp = requests.head(url, headers=headers, timeout=3, allow_redirects=True)
+        if resp.status_code == 200 and resp.url and 'news.google.com' not in resp.url:
+            return resp.url
+        resp_get = requests.get(url, headers=headers, timeout=3, allow_redirects=True)
+        if resp_get.url and 'news.google.com' not in resp_get.url:
+            return resp_get.url
+    except Exception:
+        pass
+    return url
+
 def generate_html_email_body(data):
-    """제목 클릭 시 별도 창(target='_blank')에서 원본 소스로 이동하는 HTML 이메일 본문 생성"""
+    """제목 클릭 시 언론사 원본 페이지로 이동하는 HTML 이메일 본문 생성"""
     html = f"""
     <!DOCTYPE html>
     <html>
@@ -271,7 +291,7 @@ def generate_html_email_body(data):
     return html
 
 def send_email_with_pdf(pdf_bytes, report_data, recipients=["pj2gwk@gmail.com", "miyoungchoi88@gmail.com", "kimgiwoong5@gmail.com"]):
-    """지정된 수신자들(본인, 아내, 아들)에게 링크가 포함된 HTML 이메일 및 PDF 첨부파일 동시 발송"""
+    """지정된 수신자들(본인, 아내, 아들)에게 원본 링크가 적용된 HTML 이메일 및 PDF 동시 발송"""
     sender_user = os.environ.get("EMAIL_USER")
     sender_pass = os.environ.get("EMAIL_PASS")
 
@@ -286,11 +306,9 @@ def send_email_with_pdf(pdf_bytes, report_data, recipients=["pj2gwk@gmail.com", 
         msg['To'] = ", ".join(recipients)
         msg['Subject'] = f"[StariaPj] 온타임 24시간 실시간 소식지 ({time_str} KST)"
 
-        # 1. HTML 이메일 본문 생성
         html_body = generate_html_email_body(report_data)
         msg.attach(MIMEText(html_body, 'html', 'utf-8'))
 
-        # 2. PDF 첨부파일 생성 및 추가
         pdf_filename = f"StariaPj_Daily_Report_{time_str}_KST.pdf"
         pdf_attachment = MIMEApplication(pdf_bytes, _subtype="pdf")
         pdf_attachment.add_header('Content-Disposition', 'attachment', filename=pdf_filename)
@@ -306,7 +324,7 @@ def send_email_with_pdf(pdf_bytes, report_data, recipients=["pj2gwk@gmail.com", 
         print(f"❌ 이메일 발송 오류: {e}")
 
 def fetch_google_news_rss_realtime(query, lang_zone="KR", max_hours=24):
-    """Google News RSS 최신 24시간 항목 수집 (KR: 한국 미디어, ZA: 남아공 현지 미디어)"""
+    """Google News RSS 최신 24시간 항목 수집 및 원본 직접 링크 변환"""
     realtime_query = f"{query} when:1d"
     encoded_query = urllib.parse.quote(realtime_query)
     
@@ -341,9 +359,12 @@ def fetch_google_news_rss_realtime(query, lang_zone="KR", max_hours=24):
                 if not pub_dt or pub_dt < cutoff_dt:
                     continue
                 
+                raw_link = getattr(entry, 'link', '')
+                real_link = resolve_real_url(raw_link)
+                
                 entries.append({
                     'title': title,
-                    'link': getattr(entry, 'link', ''),
+                    'link': real_link,
                     'pub_ts': pub_dt.timestamp()
                 })
     except Exception as e:
@@ -499,7 +520,7 @@ def generate_report_data(service, folder_id):
     return report_data
 
 def create_pdf_bytes(data):
-    """클릭 가능한 하이퍼링크가 내장된 PDF 리포트 생성"""
+    """클릭 가능한 언론사 원본 하이퍼링크가 내장된 PDF 리포트 생성"""
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(
         buffer,
@@ -510,7 +531,7 @@ def create_pdf_bytes(data):
         bottomMargin=35
     )
     
-    content_width = A4[0] - 70 # 525.27pt
+    content_width = A4[0] - 70 # A4 가로폭(595.27pt) - 좌우마진(70pt) = 525.27pt
 
     title_style = ParagraphStyle(
         'DocTitle', fontName='HYGothic-Medium', fontSize=18, leading=22,

@@ -85,7 +85,7 @@ def load_gdrive_cache(service, folder_id):
         if not files:
             return {}
         
-        file_id = files[0]['id']
+        file_id = files['id']
         request = service.files().get_media(fileId=file_id)
         fh = io.BytesIO()
         downloader = MediaIoBaseDownload(fh, request)
@@ -113,7 +113,7 @@ def save_gdrive_cache(service, folder_id, cache_data):
         files = results.get('files', [])
         
         if files:
-            file_id = files[0]['id']
+            file_id = files['id']
             service.files().update(fileId=file_id, media_body=media).execute()
         else:
             file_metadata = {
@@ -146,7 +146,7 @@ def upload_json_to_gdrive(service, folder_id, cache_data, time_str):
         print(f"⚠️ JSON 데이터 파일 업로드 실패: {e}")
 
 def generate_html_email_body(data):
-    """PDF 리포트와 동일한 레이아웃/디자인의 HTML 이메일 본문 생성"""
+    """제목 클릭 시 별도 창(target='_blank')에서 원본 소스로 이동하는 HTML 이메일 본문 생성"""
     html = f"""
     <!DOCTYPE html>
     <html>
@@ -174,6 +174,8 @@ def generate_html_email_body(data):
         .item-row {{ border-bottom: 1px solid #EDF2F7; }}
         .item-tag {{ width: 60px; vertical-align: top; padding: 6px 0; font-weight: bold; font-size: 12px; }}
         .item-title {{ vertical-align: top; padding: 6px 0; font-size: 13px; }}
+        .item-link {{ text-decoration: none; }}
+        .item-link:hover {{ text-decoration: underline; }}
         .empty-text {{ font-size: 12px; color: #A0AEC0; padding: 6px 0; }}
       </style>
     </head>
@@ -220,20 +222,22 @@ def generate_html_email_body(data):
             html += '<table class="item-table">'
             for idx, item in enumerate(items):
                 color = GRADIENT_COLORS[min(idx, len(GRADIENT_COLORS)-1)]
+                link_url = item.get('link', '#')
+                
                 if idx == 0:
                     tag_txt = "[🔥TOP]" if is_alert else "[⭐TOP]"
                     tag_color = "#C53030" if is_alert else "#2B6CB0"
-                    font_style = f"font-weight: bold; color: {color};"
                     tag_html = f'<span style="color: {tag_color}; font-weight: bold;">{tag_txt}</span>'
+                    title_html = f'<a href="{link_url}" target="_blank" class="item-link" style="font-weight: bold; color: {color};">{item["title"]}</a>'
                 else:
                     tag_txt = "[속보]" if key == 'breaking' else ("[특가]" if key == 'flights' else "[소식]")
-                    font_style = f"color: {color};"
                     tag_html = f'<span style="color: {color};">{tag_txt}</span>'
+                    title_html = f'<a href="{link_url}" target="_blank" class="item-link" style="color: {color};">{item["title"]}</a>'
                     
                 html += f"""
                 <tr class="item-row">
                   <td class="item-tag">{tag_html}</td>
-                  <td class="item-title" style="{font_style}">{item['title']}</td>
+                  <td class="item-title">{title_html}</td>
                 </tr>
                 """
             html += '</table>'
@@ -246,10 +250,15 @@ def generate_html_email_body(data):
         for idx, vid in enumerate(data['yt_videos']):
             color = GRADIENT_COLORS[min(idx, len(GRADIENT_COLORS)-1)]
             v_title = vid['snippet']['title']
+            v_id = vid.get('id', {}).get('videoId', '')
+            v_url = f"https://www.youtube.com/watch?v={v_id}" if v_id else "#"
+            
+            title_html = f'<a href="{v_url}" target="_blank" class="item-link" style="color: {color};">{v_title}</a>'
+            
             html += f"""
             <tr class="item-row">
               <td class="item-tag" style="color: {color};">[Shorts]</td>
-              <td class="item-title" style="color: {color};">{v_title}</td>
+              <td class="item-title">{title_html}</td>
             </tr>
             """
         html += '</table>'
@@ -262,7 +271,7 @@ def generate_html_email_body(data):
     return html
 
 def send_email_with_pdf(pdf_bytes, report_data, recipients=["pj2gwk@gmail.com", "miyoungchoi88@gmail.com"]):
-    """지정된 수신자들(남편 & 아내)에게 HTML 본문 이메일 및 PDF 첨부파일 동시 발송"""
+    """지정된 수신자들에게 링크가 포함된 HTML 이메일 및 PDF 첨부파일 동시 발송"""
     sender_user = os.environ.get("EMAIL_USER")
     sender_pass = os.environ.get("EMAIL_PASS")
 
@@ -274,10 +283,10 @@ def send_email_with_pdf(pdf_bytes, report_data, recipients=["pj2gwk@gmail.com", 
         time_str = report_data['time_str']
         msg = MIMEMultipart('mixed')
         msg['From'] = sender_user
-        msg['To'] = ", ".join(recipients)  # 두 수신자 이메일을 쉼표로 연결
+        msg['To'] = ", ".join(recipients)
         msg['Subject'] = f"[StariaPj] 온타임 24시간 실시간 소식지 ({time_str} KST)"
 
-        # 1. HTML 이메일 본문 생성
+        # 1. HTML 이메일 본문 생성 (클릭 시 새 창 이동 하이퍼링크 적용)
         html_body = generate_html_email_body(report_data)
         msg.attach(MIMEText(html_body, 'html', 'utf-8'))
 
@@ -490,7 +499,7 @@ def generate_report_data(service, folder_id):
     return report_data
 
 def create_pdf_bytes(data):
-    """중요도 배치 및 10단계 시각적 그라데이션이 적용된 PDF 리포트 생성"""
+    """클릭 가능한 하이퍼링크가 내장된 PDF 리포트 생성"""
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(
         buffer,
@@ -501,7 +510,7 @@ def create_pdf_bytes(data):
         bottomMargin=35
     )
     
-    content_width = A4[0] - 70 # 525.27pt
+    content_width = A4 - 70 # 525.27pt
 
     title_style = ParagraphStyle(
         'DocTitle', fontName='HYGothic-Medium', fontSize=18, leading=22,
@@ -627,6 +636,11 @@ def create_pdf_bytes(data):
             table_rows = []
             for idx, item in enumerate(items):
                 color_hex = GRADIENT_COLORS[min(idx, len(GRADIENT_COLORS)-1)]
+                link_url = item.get('link', '')
+                clean_t = clean_text(item['title'])
+                
+                # PDF 하이퍼링크 태그 적용
+                title_text = f'<a href="{link_url}">{clean_t}</a>' if link_url else clean_t
                 
                 if idx == 0:
                     tag_txt = "[🔥TOP]" if is_alert else "[⭐TOP]"
@@ -634,7 +648,7 @@ def create_pdf_bytes(data):
                         f'TagTop_{key}', fontName='HYGothic-Medium', fontSize=9, leading=13,
                         textColor=colors.HexColor('#C53030' if is_alert else '#2B6CB0')
                     ))
-                    p_body = Paragraph(f"<b>{clean_text(item['title'])}</b>", ParagraphStyle(
+                    p_body = Paragraph(f"<b>{title_text}</b>", ParagraphStyle(
                         f'BodyTop_{key}', fontName='HYGothic-Medium', fontSize=9.5, leading=14,
                         textColor=colors.HexColor(color_hex)
                     ))
@@ -644,7 +658,7 @@ def create_pdf_bytes(data):
                         f'Tag_{key}_{idx}', fontName='HYGothic-Medium', fontSize=8.5, leading=12,
                         textColor=colors.HexColor(color_hex)
                     ))
-                    p_body = Paragraph(clean_text(item['title']), ParagraphStyle(
+                    p_body = Paragraph(title_text, ParagraphStyle(
                         f'Body_{key}_{idx}', fontName='HYGothic-Medium', fontSize=8.5, leading=13,
                         textColor=colors.HexColor(color_hex)
                     ))
@@ -673,8 +687,13 @@ def create_pdf_bytes(data):
         for idx, vid in enumerate(data['yt_videos']):
             color_hex = GRADIENT_COLORS[min(idx, len(GRADIENT_COLORS)-1)]
             v_title = clean_text(vid['snippet']['title'])
+            v_id = vid.get('id', {}).get('videoId', '')
+            v_url = f"https://www.youtube.com/watch?v={v_id}" if v_id else ""
+            
+            title_text = f'<a href="{v_url}">{v_title}</a>' if v_url else v_title
+            
             p_tag = Paragraph("[Shorts]", ParagraphStyle(f'YTag_{idx}', fontName='HYGothic-Medium', fontSize=8.5, leading=12, textColor=colors.HexColor(color_hex)))
-            p_body = Paragraph(v_title, ParagraphStyle(f'YBody_{idx}', fontName='HYGothic-Medium', fontSize=8.5, leading=13, textColor=colors.HexColor(color_hex)))
+            p_body = Paragraph(title_text, ParagraphStyle(f'YBody_{idx}', fontName='HYGothic-Medium', fontSize=8.5, leading=13, textColor=colors.HexColor(color_hex)))
             yt_rows.append([p_tag, p_body])
             
         yt_table = Table(yt_rows, colWidths=[50, content_width - 50])
@@ -732,5 +751,5 @@ if __name__ == "__main__":
     upload_to_gdrive(service, folder_id, pdf_bytes, report_data['time_str'])
     upload_json_to_gdrive(service, folder_id, report_data['new_cache'], report_data['time_str'])
     save_gdrive_cache(service, folder_id, report_data['new_cache'])
-    # 남편(pj2gwk@gmail.com) 및 아내(miyoungchoi88@gmail.com) , 아들 (kimgiwoong5@gmail.com) 세 분께 동시 발송
+     # 남편(pj2gwk@gmail.com) 및 아내(miyoungchoi88@gmail.com) , 아들 (kimgiwoong5@gmail.com) 세 분께 동시 발송
     send_email_with_pdf(pdf_bytes, report_data, recipients=["pj2gwk@gmail.com", "miyoungchoi88@gmail.com", "kimgiwoong5@gmail.com"])

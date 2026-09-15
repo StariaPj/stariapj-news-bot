@@ -71,7 +71,6 @@ def decode_google_news_url(url):
             for f_url in found_urls:
                 f_str = f_url.decode('utf-8', errors='ignore')
                 if 'google.com' not in f_str and 'news.google' not in f_str:
-                    # 안전한 URL 퍼센트 인코딩 적용
                     parsed = urllib.parse.urlparse(f_str)
                     safe_path = urllib.parse.quote(parsed.path)
                     safe_url = urllib.parse.urlunparse((
@@ -115,7 +114,7 @@ def load_gdrive_cache(service, folder_id):
         if not files:
             return {}
         
-        file_id = files['id']
+        file_id = files[0]['id']  # ⭕ 리스트 첫 번째 인덱스 참조로 수정
         request = service.files().get_media(fileId=file_id)
         fh = io.BytesIO()
         downloader = MediaIoBaseDownload(fh, request)
@@ -143,7 +142,7 @@ def save_gdrive_cache(service, folder_id, cache_data):
         files = results.get('files', [])
         
         if files:
-            file_id = files['id']
+            file_id = files[0]['id']  # ⭕ 리스트 첫 번째 인덱스 참조로 수정
             service.files().update(fileId=file_id, media_body=media).execute()
         else:
             file_metadata = {
@@ -543,7 +542,7 @@ def create_pdf_bytes(data):
         bottomMargin=35
     )
     
-    content_width = A4 - 70 # A4 가로폭(595.27pt) - 좌우마진(70pt) = 525.27pt
+    content_width = A4[0] - 70 # ⭕ A4[0] (595.27pt) - 70pt = 525.27pt
 
     title_style = ParagraphStyle(
         'DocTitle', fontName='HYGothic-Medium', fontSize=18, leading=22,

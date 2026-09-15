@@ -57,7 +57,7 @@ def is_banned_title(title):
     return False
 
 def decode_google_news_url(url):
-    """구글 뉴스 RSS 링크(Base64/Protobuf)에서 실제 언론사 원본 주소를 네트워크 통신 없이 0.001초 만에 직접 추출"""
+    """구글 뉴스 RSS 링크(Base64/Protobuf)에서 실제 언론사 원본 주소를 추출하고 안전한 URL로 변환"""
     if not url or url == '#' or 'news.google.com' not in url:
         return url
     try:
@@ -67,12 +67,18 @@ def decode_google_news_url(url):
             padded_b64 = b64_str + '=' * (-len(b64_str) % 4)
             decoded_bytes = base64.urlsafe_b64decode(padded_b64)
             
-            # 바이너리 패킷 내부에서 실제 https:// 또는 http:// 원본 주소 수색
             found_urls = re.findall(rb'https?://[a-zA-Z0-9\.\-_~:/?#\\[\\]@!$&\'()*+,;=%]+', decoded_bytes)
             for f_url in found_urls:
                 f_str = f_url.decode('utf-8', errors='ignore')
                 if 'google.com' not in f_str and 'news.google' not in f_str:
-                    return f_str
+                    # 안전한 URL 퍼센트 인코딩 적용
+                    parsed = urllib.parse.urlparse(f_str)
+                    safe_path = urllib.parse.quote(parsed.path)
+                    safe_url = urllib.parse.urlunparse((
+                        parsed.scheme, parsed.netloc, safe_path,
+                        parsed.params, parsed.query, parsed.fragment
+                    ))
+                    return safe_url
     except Exception:
         pass
     return url
@@ -109,7 +115,7 @@ def load_gdrive_cache(service, folder_id):
         if not files:
             return {}
         
-        file_id = files[0]['id']
+        file_id = files['id']
         request = service.files().get_media(fileId=file_id)
         fh = io.BytesIO()
         downloader = MediaIoBaseDownload(fh, request)
@@ -137,7 +143,7 @@ def save_gdrive_cache(service, folder_id, cache_data):
         files = results.get('files', [])
         
         if files:
-            file_id = files[0]['id']
+            file_id = files['id']
             service.files().update(fileId=file_id, media_body=media).execute()
         else:
             file_metadata = {
@@ -537,7 +543,7 @@ def create_pdf_bytes(data):
         bottomMargin=35
     )
     
-    content_width = A4[0] - 70 # A4 가로폭(595.27pt) - 좌우마진(70pt) = 525.27pt
+    content_width = A4 - 70 # A4 가로폭(595.27pt) - 좌우마진(70pt) = 525.27pt
 
     title_style = ParagraphStyle(
         'DocTitle', fontName='HYGothic-Medium', fontSize=18, leading=22,

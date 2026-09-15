@@ -880,5 +880,5 @@ if __name__ == "__main__":
     save_gdrive_cache(service, folder_id, report_data['new_cache'])
     ## 본인, 아내, 아들 세 분께 동시 발송
     #send_email_with_pdf(pdf_bytes, report_data, recipients=["pj2gwk@gmail.com", "miyoungchoi88@gmail.com", "kimgiwoong5@gmail.com"])
-    # 본인 TEST 전용 발송 
+    # 본인 TEST 본인에게만  발송 
     send_email_with_pdf(pdf_bytes, report_data, recipients=["pj2gwk@gmail.com"])

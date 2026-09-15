@@ -371,7 +371,11 @@ def generate_html_email_body(data):
 def send_email_with_pdf(pdf_bytes, report_data, recipients=None):
     """지정된 수신자들에게 원본 링크가 적용된 HTML 이메일 및 PDF 동시 발송"""
     if recipients is None:
-        recipients = ["pj2gwk@gmail.com", "miyoungchoi88@gmail.com", "kimgiwoong5@gmail.com"]
+        env_recipients = os.environ.get("RECIPIENTS")
+        if env_recipients:
+            recipients = [r.strip() for r in env_recipients.split(",") if r.strip()]
+        else:
+            recipients = ["pj2gwk@gmail.com", "miyoungchoi88@gmail.com", "kimgiwoong5@gmail.com"]
         
     sender_user = os.environ.get("EMAIL_USER")
     sender_pass = os.environ.get("EMAIL_PASS")
@@ -882,7 +886,5 @@ if __name__ == "__main__":
     upload_to_gdrive(service, folder_id, pdf_bytes, report_data['time_str'])
     upload_json_to_gdrive(service, folder_id, report_data['new_cache'], report_data['time_str'])
     save_gdrive_cache(service, folder_id, report_data['new_cache'])
-    ## 본인, 아내, 아들 세 분께 동시 발송
-     send_email_with_pdf(pdf_bytes, report_data, recipients=["pj2gwk@gmail.com", "miyoungchoi88@gmail.com", "kimgiwoong5@gmail.com"])
-    # 본인 ONLY (Test Mode)
-    #send_email_with_pdf(pdf_bytes, report_data, recipients=["pj2gwk@gmail.com"])
+    # 이메일 발송
+    send_email_with_pdf(pdf_bytes, report_data)

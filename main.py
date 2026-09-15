@@ -2,6 +2,9 @@ import io
 import os
 import sys
 import json
+import re
+import html
+import base64
 import requests
 import feedparser
 import urllib.parse
@@ -52,6 +55,27 @@ def is_banned_title(title):
         if kw.lower() in title.lower():
             return True
     return False
+
+def decode_google_news_url(url):
+    """구글 뉴스 RSS 링크(Base64/Protobuf)에서 실제 언론사 원본 주소를 네트워크 통신 없이 0.001초 만에 직접 추출"""
+    if not url or url == '#' or 'news.google.com' not in url:
+        return url
+    try:
+        match = re.search(r'articles/([^/?]+)', url)
+        if match:
+            b64_str = match.group(1)
+            padded_b64 = b64_str + '=' * (-len(b64_str) % 4)
+            decoded_bytes = base64.urlsafe_b64decode(padded_b64)
+            
+            # 바이너리 패킷 내부에서 실제 https:// 또는 http:// 원본 주소 수색
+            found_urls = re.findall(rb'https?://[a-zA-Z0-9\.\-_~:/?#\\[\\]@!$&\'()*+,;=%]+', decoded_bytes)
+            for f_url in found_urls:
+                f_str = f_url.decode('utf-8', errors='ignore')
+                if 'google.com' not in f_str and 'news.google' not in f_str:
+                    return f_str
+    except Exception:
+        pass
+    return url
 
 def get_gdrive_service():
     """Google Drive API 서비스 객체 생성"""
@@ -145,29 +169,9 @@ def upload_json_to_gdrive(service, folder_id, cache_data, time_str):
     except Exception as e:
         print(f"⚠️ JSON 데이터 파일 업로드 실패: {e}")
 
-def resolve_real_url(url):
-    """구글 뉴스 RSS 경유 링크를 언론사 원본 직접 주소로 자동 변환"""
-    if not url or url == '#':
-        return '#'
-    if 'news.google.com' not in url:
-        return url
-    try:
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-        }
-        resp = requests.head(url, headers=headers, timeout=3, allow_redirects=True)
-        if resp.status_code == 200 and resp.url and 'news.google.com' not in resp.url:
-            return resp.url
-        resp_get = requests.get(url, headers=headers, timeout=3, allow_redirects=True)
-        if resp_get.url and 'news.google.com' not in resp_get.url:
-            return resp_get.url
-    except Exception:
-        pass
-    return url
-
 def generate_html_email_body(data):
-    """제목 클릭 시 언론사 원본 페이지로 이동하는 HTML 이메일 본문 생성"""
-    html = f"""
+    """제목 클릭 시 별도 창(target='_blank')에서 원본 언론사 소스로 이동하는 HTML 이메일 본문 생성"""
+    html_code = f"""
     <!DOCTYPE html>
     <html>
     <head>
@@ -210,18 +214,18 @@ def generate_html_email_body(data):
     
     if data.get('shorts_top3'):
         for idx, item in enumerate(data['shorts_top3'], 1):
-            html += f"""
+            html_code += f"""
             <div class="card">
-              <div class="card-title">{idx}. [{item['category']}] {item['title']}</div>
-              <div class="card-reason">💡 <b>추천 이유:</b> <i>{item['reason']}</i></div>
-              <div class="card-hook">🎯 <b>3초 Hook 멘트:</b> {item.get('hook', '')}</div>
-              <div class="card-script">⏱️ <b>30초 대본 개요:</b> {item.get('script', '')}</div>
+              <div class="card-title">{idx}. [{item['category']}] {html.escape(item['title'])}</div>
+              <div class="card-reason">💡 <b>추천 이유:</b> <i>{html.escape(item['reason'])}</i></div>
+              <div class="card-hook">🎯 <b>3초 Hook 멘트:</b> {html.escape(item.get('hook', ''))}</div>
+              <div class="card-script">⏱️ <b>30초 대본 개요:</b> {html.escape(item.get('script', ''))}</div>
             </div>
             """
     else:
-        html += '<div class="empty-text">• 최근 24시간 이내 수집된 소식지 내용 중 별도 추천할 파급 이슈가 없습니다.</div>'
+        html_code += '<div class="empty-text">• 최근 24시간 이내 수집된 소식지 내용 중 별도 추천할 파급 이슈가 없습니다.</div>'
         
-    html += '<hr style="border:0; height:1px; background:#E2E8F0; margin:15px 0;">'
+    html_code += '<hr style="border:0; height:1px; background:#E2E8F0; margin:15px 0;">'
     
     sections = [
         ('breaking', '🚨 [실시간 긴급 속보] 남아공 · 아프리카 · 한국 관련 주요 사건/사고', True),
@@ -235,60 +239,61 @@ def generate_html_email_body(data):
     
     for key, sec_title, is_alert in sections:
         bar_class = "sec-bar-alert" if is_alert else "sec-bar-normal"
-        html += f'<div class="sec-bar {bar_class}">{sec_title}</div>'
+        html_code += f'<div class="sec-bar {bar_class}">{sec_title}</div>'
         
         items = data.get(key, [])
         if items:
-            html += '<table class="item-table">'
+            html_code += '<table class="item-table">'
             for idx, item in enumerate(items):
                 color = GRADIENT_COLORS[min(idx, len(GRADIENT_COLORS)-1)]
-                link_url = item.get('link', '#')
+                link_url = html.escape(item.get('link', '#'))
+                title_txt = html.escape(item['title'])
                 
                 if idx == 0:
                     tag_txt = "[🔥TOP]" if is_alert else "[⭐TOP]"
                     tag_color = "#C53030" if is_alert else "#2B6CB0"
                     tag_html = f'<span style="color: {tag_color}; font-weight: bold;">{tag_txt}</span>'
-                    title_html = f'<a href="{link_url}" target="_blank" class="item-link" style="font-weight: bold; color: {color};">{item["title"]}</a>'
+                    title_html = f'<a href="{link_url}" target="_blank" class="item-link" style="font-weight: bold; color: {color};">{title_txt}</a>'
                 else:
                     tag_txt = "[속보]" if key == 'breaking' else ("[특가]" if key == 'flights' else "[소식]")
                     tag_html = f'<span style="color: {color};">{tag_txt}</span>'
-                    title_html = f'<a href="{link_url}" target="_blank" class="item-link" style="color: {color};">{item["title"]}</a>'
+                    title_html = f'<a href="{link_url}" target="_blank" class="item-link" style="color: {color};">{title_txt}</a>'
                     
-                html += f"""
+                html_code += f"""
                 <tr class="item-row">
                   <td class="item-tag">{tag_html}</td>
                   <td class="item-title">{title_html}</td>
                 </tr>
                 """
-            html += '</table>'
+            html_code += '</table>'
         else:
-            html += '<div class="empty-text">• 최근 24시간 이내 등록되거나 유효한 소식이 없습니다.</div>'
+            html_code += '<div class="empty-text">• 최근 24시간 이내 등록되거나 유효한 소식이 없습니다.</div>'
             
     if data.get('yt_videos'):
-        html += '<div class="sec-bar sec-bar-normal">▶️ [YouTube 24HR 바이럴 영상]</div>'
-        html += '<table class="item-table">'
+        html_code += '<div class="sec-bar sec-bar-normal">▶️ [YouTube 24HR 바이럴 영상]</div>'
+        html_code += '<table class="item-table">'
         for idx, vid in enumerate(data['yt_videos']):
             color = GRADIENT_COLORS[min(idx, len(GRADIENT_COLORS)-1)]
-            v_title = vid['snippet']['title']
+            v_title = html.escape(vid['snippet']['title'])
             v_id = vid.get('id', {}).get('videoId', '')
             v_url = f"https://www.youtube.com/watch?v={v_id}" if v_id else "#"
             
             title_html = f'<a href="{v_url}" target="_blank" class="item-link" style="color: {color};">{v_title}</a>'
             
-            html += f"""
+            html_code += f"""
             <tr class="item-row">
               <td class="item-tag" style="color: {color};">[Shorts]</td>
               <td class="item-title">{title_html}</td>
             </tr>
             """
-        html += '</table>'
+        html_code += '</table>'
         
-    html += """
+    html_code += """
       </div>
     </body>
     </html>
     """
-    return html
+    return html_code
 
 def send_email_with_pdf(pdf_bytes, report_data, recipients=["pj2gwk@gmail.com", "miyoungchoi88@gmail.com", "kimgiwoong5@gmail.com"]):
     """지정된 수신자들(본인, 아내, 아들)에게 원본 링크가 적용된 HTML 이메일 및 PDF 동시 발송"""
@@ -324,7 +329,7 @@ def send_email_with_pdf(pdf_bytes, report_data, recipients=["pj2gwk@gmail.com", 
         print(f"❌ 이메일 발송 오류: {e}")
 
 def fetch_google_news_rss_realtime(query, lang_zone="KR", max_hours=24):
-    """Google News RSS 최신 24시간 항목 수집 및 원본 직접 링크 변환"""
+    """Google News RSS 최신 24시간 항목 수집 및 즉시 디코딩"""
     realtime_query = f"{query} when:1d"
     encoded_query = urllib.parse.quote(realtime_query)
     
@@ -360,11 +365,11 @@ def fetch_google_news_rss_realtime(query, lang_zone="KR", max_hours=24):
                     continue
                 
                 raw_link = getattr(entry, 'link', '')
-                real_link = resolve_real_url(raw_link)
+                clean_link = decode_google_news_url(raw_link)
                 
                 entries.append({
                     'title': title,
-                    'link': real_link,
+                    'link': clean_link,
                     'pub_ts': pub_dt.timestamp()
                 })
     except Exception as e:
@@ -508,6 +513,7 @@ def generate_report_data(service, folder_id):
         
         cached_entries = old_cache.get(key, [])
         merged = merge_and_filter_entries(raw_entries, cached_entries, max_hours=24, limit=10)
+        
         report_data[key] = merged
         new_cache[key] = merged
         
@@ -657,7 +663,7 @@ def create_pdf_bytes(data):
             table_rows = []
             for idx, item in enumerate(items):
                 color_hex = GRADIENT_COLORS[min(idx, len(GRADIENT_COLORS)-1)]
-                link_url = item.get('link', '')
+                link_url = html.escape(item.get('link', ''))
                 clean_t = clean_text(item['title'])
                 
                 title_text = f'<a href="{link_url}">{clean_t}</a>' if link_url else clean_t

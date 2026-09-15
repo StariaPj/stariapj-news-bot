@@ -30,9 +30,9 @@ pdfmetrics.registerFont(UnicodeCIDFont('HYSMyeongJo-Medium'))
 # 🚫 오래된 노이즈 및 예전 기사 제목 블랙리스트 키워드
 BANNED_TITLE_KEYWORDS = ["홍명보", "체코", "16년 만에", "미주조선일보", "2-1 역전승", "히딩크", "벤투"]
 
-# 🎨 10단계 중요도 순 그라데이션 색상 (1위: 가장 짙은 먹색 ~ 10위: 옅은 은은한 회색)
+# 🎨 10단계 중요도 순 그라데이션 색상 (1위: 가장 짙은 먹색 ~ 10위: 옅은 회색)
 GRADIENT_COLORS = [
-    '#0F172A',  # 1위 (TOP): 가장 짙은 먹색 (최우선 시선 집중)
+    '#0F172A',  # 1위 (TOP): 가장 짙은 먹색
     '#1E293B',  # 2위
     '#334155',  # 3위
     '#475569',  # 4위
@@ -41,7 +41,7 @@ GRADIENT_COLORS = [
     '#8592A6',  # 7위
     '#94A3B8',  # 8위
     '#A0AEC0',  # 9위
-    '#CBD5E1'   # 10위: 가장 옅은 회색 (하위 소식)
+    '#CBD5E1'   # 10위: 가장 옅은 회색
 ]
 
 def is_banned_title(title):
@@ -145,8 +145,124 @@ def upload_json_to_gdrive(service, folder_id, cache_data, time_str):
     except Exception as e:
         print(f"⚠️ JSON 데이터 파일 업로드 실패: {e}")
 
-def send_email_with_pdf(pdf_bytes, time_str, recipient_email="pj2gwk@gmail.com"):
-    """PDF 리포트를 이메일 첨부파일로 지정 수신자에게 동시 발송"""
+def generate_html_email_body(data):
+    """PDF 리포트와 동일한 레이아웃/디자인의 HTML 이메일 본문 생성"""
+    html = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="utf-8">
+      <style>
+        body {{ font-family: 'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif; color: #2D3748; line-height: 1.5; margin: 0; padding: 20px; background-color: #F7FAFC; }}
+        .container {{ max-width: 680px; margin: 0 auto; background: #ffffff; padding: 25px; border-radius: 8px; border: 1px solid #E2E8F0; }}
+        .title {{ font-size: 20px; font-weight: bold; color: #1A202C; margin-bottom: 4px; }}
+        .subtitle {{ font-size: 12px; color: #718096; margin-bottom: 12px; }}
+        .divider {{ border: 0; height: 2px; background: #5A67D8; margin-bottom: 15px; }}
+        
+        .shorts-box {{ background: #F3E8FF; border-left: 4px solid #6B46C1; padding: 10px 14px; font-weight: bold; color: #5A67D8; font-size: 14px; border-radius: 4px; margin-bottom: 10px; }}
+        .card {{ background: #FAF5FF; border: 1px solid #E9D8FD; border-left: 4px solid #805AD5; padding: 12px; margin-bottom: 10px; border-radius: 6px; }}
+        .card-title {{ font-weight: bold; font-size: 13px; color: #2D3748; margin-bottom: 4px; }}
+        .card-reason {{ font-size: 12px; color: #4A5568; margin-bottom: 4px; }}
+        .card-hook {{ font-weight: bold; font-size: 12px; color: #C53030; margin-bottom: 4px; }}
+        .card-script {{ font-size: 12px; color: #2B6CB0; }}
+        
+        .sec-bar {{ padding: 8px 12px; font-weight: bold; font-size: 13px; margin-top: 15px; margin-bottom: 8px; border-radius: 4px; border-left: 4px solid; }}
+        .sec-bar-alert {{ background: #FFF5F5; border-color: #E53E3E; color: #9B2C2C; }}
+        .sec-bar-normal {{ background: #EBF8FF; border-color: #3182CE; color: #2B6CB0; }}
+        
+        .item-table {{ width: 100%; border-collapse: collapse; margin-bottom: 10px; }}
+        .item-row {{ border-bottom: 1px solid #EDF2F7; }}
+        .item-tag {{ width: 60px; vertical-align: top; padding: 6px 0; font-weight: bold; font-size: 12px; }}
+        .item-title {{ vertical-align: top; padding: 6px 0; font-size: 13px; }}
+        .empty-text {{ font-size: 12px; color: #A0AEC0; padding: 6px 0; }}
+      </style>
+    </head>
+    <body>
+      <div class="container">
+        <div class="title">StariaPj 온타임 24시간 긴급속보 &amp; Shorts 제작 리포트</div>
+        <div class="subtitle">발행 일시: {data['now_kst_str']} (KST) | 최근 24시간 유효 소식 및 숏츠 대본 가이드</div>
+        <hr class="divider">
+        
+        <div class="shorts-box">🎬 [필수 제작] 지금 당장 쇼츠(Shorts)로 만들어야 하는 주제 TOP 3</div>
+    """
+    
+    if data.get('shorts_top3'):
+        for idx, item in enumerate(data['shorts_top3'], 1):
+            html += f"""
+            <div class="card">
+              <div class="card-title">{idx}. [{item['category']}] {item['title']}</div>
+              <div class="card-reason">💡 <b>추천 이유:</b> <i>{item['reason']}</i></div>
+              <div class="card-hook">🎯 <b>3초 Hook 멘트:</b> {item.get('hook', '')}</div>
+              <div class="card-script">⏱️ <b>30초 대본 개요:</b> {item.get('script', '')}</div>
+            </div>
+            """
+    else:
+        html += '<div class="empty-text">• 최근 24시간 이내 수집된 소식지 내용 중 별도 추천할 파급 이슈가 없습니다.</div>'
+        
+    html += '<hr style="border:0; height:1px; background:#E2E8F0; margin:15px 0;">'
+    
+    sections = [
+        ('breaking', '🚨 [실시간 긴급 속보] 남아공 · 아프리카 · 한국 관련 주요 사건/사고', True),
+        ('flights', '✈️ [항공 특가] 한국 ↔ 남아공 24HR 특가 항공권 & 프로모션', True),
+        ('exchanges', '🌐 [문화/교류] 한국-아프리카 & 남아공-한국 테마 행사 소식', False),
+        ('sports', '⚽ [스포츠] 아프리카 ↔ 한국 대표팀 24HR 매치 & 스포츠 이벤트', False),
+        ('festivals', '🍷 [미식 축제] K-Food & 남아공 South Africa 미식 페스티벌', False),
+        ('mice', '🏛️ [MICE & 컨벤션] 주요 MICE 행사 및 국제 박람회 소식', False),
+        ('promotions', '🎁 [관광 혜택] 한국 · 남아공 관광 이벤트 및 할인 혜택', False)
+    ]
+    
+    for key, sec_title, is_alert in sections:
+        bar_class = "sec-bar-alert" if is_alert else "sec-bar-normal"
+        html += f'<div class="sec-bar {bar_class}">{sec_title}</div>'
+        
+        items = data.get(key, [])
+        if items:
+            html += '<table class="item-table">'
+            for idx, item in enumerate(items):
+                color = GRADIENT_COLORS[min(idx, len(GRADIENT_COLORS)-1)]
+                if idx == 0:
+                    tag_txt = "[🔥TOP]" if is_alert else "[⭐TOP]"
+                    tag_color = "#C53030" if is_alert else "#2B6CB0"
+                    font_style = f"font-weight: bold; color: {color};"
+                    tag_html = f'<span style="color: {tag_color}; font-weight: bold;">{tag_txt}</span>'
+                else:
+                    tag_txt = "[속보]" if key == 'breaking' else ("[특가]" if key == 'flights' else "[소식]")
+                    font_style = f"color: {color};"
+                    tag_html = f'<span style="color: {color};">{tag_txt}</span>'
+                    
+                html += f"""
+                <tr class="item-row">
+                  <td class="item-tag">{tag_html}</td>
+                  <td class="item-title" style="{font_style}">{item['title']}</td>
+                </tr>
+                """
+            html += '</table>'
+        else:
+            html += '<div class="empty-text">• 최근 24시간 이내 등록되거나 유효한 소식이 없습니다.</div>'
+            
+    if data.get('yt_videos'):
+        html += '<div class="sec-bar sec-bar-normal">▶️ [YouTube 24HR 바이럴 영상]</div>'
+        html += '<table class="item-table">'
+        for idx, vid in enumerate(data['yt_videos']):
+            color = GRADIENT_COLORS[min(idx, len(GRADIENT_COLORS)-1)]
+            v_title = vid['snippet']['title']
+            html += f"""
+            <tr class="item-row">
+              <td class="item-tag" style="color: {color};">[Shorts]</td>
+              <td class="item-title" style="color: {color};">{v_title}</td>
+            </tr>
+            """
+        html += '</table>'
+        
+    html += """
+      </div>
+    </body>
+    </html>
+    """
+    return html
+
+def send_email_with_pdf(pdf_bytes, report_data, recipients=["pj2gwk@gmail.com", "miyoungchoi88@gmail.com"]):
+    """지정된 수신자들(남편 & 아내)에게 HTML 본문 이메일 및 PDF 첨부파일 동시 발송"""
     sender_user = os.environ.get("EMAIL_USER")
     sender_pass = os.environ.get("EMAIL_PASS")
 
@@ -155,22 +271,17 @@ def send_email_with_pdf(pdf_bytes, time_str, recipient_email="pj2gwk@gmail.com")
         return
 
     try:
-        msg = MIMEMultipart()
+        time_str = report_data['time_str']
+        msg = MIMEMultipart('mixed')
         msg['From'] = sender_user
-        msg['To'] = recipient_email
+        msg['To'] = ", ".join(recipients)  # 두 수신자 이메일을 쉼표로 연결
         msg['Subject'] = f"[StariaPj] 온타임 24시간 실시간 소식지 ({time_str} KST)"
 
-        body_text = f"""안녕하세요, StariaPj 자동화 소식지 시스템입니다.
+        # 1. HTML 이메일 본문 생성
+        html_body = generate_html_email_body(report_data)
+        msg.attach(MIMEText(html_body, 'html', 'utf-8'))
 
-요청하신 최근 24시간 실시간 온타임(On-Time) 특보 소식지 및 Shorts 제작 추천 리포트(PDF)를 첨부하여 전송합니다.
-
-- 발행 시각: {time_str} (KST)
-- 수신 이메일: {recipient_email}
-
-감사합니다.
-"""
-        msg.attach(MIMEText(body_text, 'plain', 'utf-8'))
-
+        # 2. PDF 첨부파일 생성 및 추가
         pdf_filename = f"StariaPj_Daily_Report_{time_str}_KST.pdf"
         pdf_attachment = MIMEApplication(pdf_bytes, _subtype="pdf")
         pdf_attachment.add_header('Content-Disposition', 'attachment', filename=pdf_filename)
@@ -181,7 +292,7 @@ def send_email_with_pdf(pdf_bytes, time_str, recipient_email="pj2gwk@gmail.com")
             server.login(sender_user, sender_pass)
             server.send_message(msg)
 
-        print(f"📧 이메일 발송 완료! ({recipient_email} (으)로 성공적으로 전송되었습니다.)")
+        print(f"📧 이메일 동시 발송 완료! ({', '.join(recipients)} (으)로 성공적으로 전송되었습니다.)")
     except Exception as e:
         print(f"❌ 이메일 발송 오류: {e}")
 
@@ -277,7 +388,6 @@ def merge_and_filter_entries(new_entries, cached_entries, max_hours=24, limit=10
         if n.get('pub_ts', 0) >= cutoff_ts:
             combined_dict[title] = n
             
-    # 중요도/발행 시각 기준 내림차순 정렬 (가장 최신/중요 소식이 1위 맨 위로)
     sorted_items = sorted(combined_dict.values(), key=lambda x: x['pub_ts'], reverse=True)
     return sorted_items[:limit]
 
@@ -426,12 +536,10 @@ def create_pdf_bytes(data):
 
     story = []
     
-    # 1. 헤더 영역
     story.append(Paragraph("StariaPj 온타임 24시간 긴급속보 &amp; Shorts 제작 리포트", title_style))
     story.append(Paragraph(f"발행 일시: {data['now_kst_str']} (KST) | 최근 24시간 유효 소식 및 숏츠 대본 가이드", subtitle_style))
     story.append(HRFlowable(width="100%", thickness=2, color=colors.HexColor('#5A67D8'), spaceAfter=12))
     
-    # 2. 🎬 Shorts 추천 TOP 3
     shorts_header_p = Paragraph("<font color='#5A67D8'><b>🎬 [필수 제작] 지금 당장 쇼츠(Shorts)로 만들어야 하는 주제 TOP 3</b></font>", ParagraphStyle('SH', fontName='HYGothic-Medium', fontSize=11, leading=15))
     sh_table = Table([[shorts_header_p]], colWidths=[content_width])
     sh_table.setStyle(TableStyle([
@@ -518,10 +626,8 @@ def create_pdf_bytes(data):
         if items:
             table_rows = []
             for idx, item in enumerate(items):
-                # 중요도 및 순위에 따른 10단계 그라데이션 컬러 적용
                 color_hex = GRADIENT_COLORS[min(idx, len(GRADIENT_COLORS)-1)]
                 
-                # 1위 (최상단 TOP 1) 강조 스타일
                 if idx == 0:
                     tag_txt = "[🔥TOP]" if is_alert else "[⭐TOP]"
                     p_tag = Paragraph(f"<b>{tag_txt}</b>", ParagraphStyle(
@@ -626,4 +732,5 @@ if __name__ == "__main__":
     upload_to_gdrive(service, folder_id, pdf_bytes, report_data['time_str'])
     upload_json_to_gdrive(service, folder_id, report_data['new_cache'], report_data['time_str'])
     save_gdrive_cache(service, folder_id, report_data['new_cache'])
-    send_email_with_pdf(pdf_bytes, report_data['time_str'], recipient_email="pj2gwk@gmail.com")
+    # 남편(pj2gwk@gmail.com) 및 아내(miyoungchoi88@gmail.com) , 아들 (kimgiwoong5@gmail.com) 세 분께 동시 발송
+    send_email_with_pdf(pdf_bytes, report_data, recipients=["pj2gwk@gmail.com", "miyoungchoi88@gmail.com", "kimgiwoong5@gmail.com"])

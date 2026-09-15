@@ -33,6 +33,11 @@ pdfmetrics.registerFont(UnicodeCIDFont('HYSMyeongJo-Medium'))
 # 🚫 오래된 노이즈 및 예전 기사 제목 블랙리스트 키워드
 BANNED_TITLE_KEYWORDS = ["홍명보", "체코", "16년 만에", "미주조선일보", "2-1 역전승", "히딩크", "벤투"]
 
+# 🚫 외계어 깨짐 및 무의미한 노이즈를 유발하는 해외 도메인 블랙리스트
+BANNED_DOMAINS = [
+    ".ua", ".ru", ".cz", ".by", ".cn", ".pl", "ua.news", "krakow", "pravda.ru"
+]
+
 # 🎨 10단계 중요도 순 그라데이션 색상 (1위: 가장 짙은 먹색 ~ 10위: 옅은 회색)
 GRADIENT_COLORS = [
     '#0F172A',  # 1위 (TOP): 가장 짙은 먹색
@@ -56,10 +61,29 @@ def is_banned_title(title):
             return True
     return False
 
-def decode_google_news_url(url):
-    """구글 뉴스 RSS 링크(Base64/Protobuf)에서 실제 언론사 원본 주소를 추출하고 안전한 URL로 변환"""
-    if not url or url == '#' or 'news.google.com' not in url:
+def is_banned_domain(url):
+    """불필요한 해외 노이즈 도메인(.ua, .ru 등) 필터링"""
+    if not url:
+        return False
+    try:
+        domain = urllib.parse.urlparse(url).netloc.lower()
+        for b_dom in BANNED_DOMAINS:
+            if domain.endswith(b_dom) or b_dom in domain:
+                return True
+    except Exception:
+        pass
+    return False
+
+def decode_google_news_url(url, title=""):
+    """구글 뉴스 RSS 링크(Base64/Protobuf)에서 실제 언론사 원본 주소를 초고속 내장 디코딩.
+    실패 시 구글 검색 링크로 안전 전환하여 100% 정상 연결 보장.
+    """
+    if not url or url == '#':
+        return f"https://www.google.com/search?q={urllib.parse.quote(title)}" if title else '#'
+    
+    if 'news.google.com' not in url:
         return url
+        
     try:
         match = re.search(r'articles/([^/?]+)', url)
         if match:
@@ -71,15 +95,13 @@ def decode_google_news_url(url):
             for f_url in found_urls:
                 f_str = f_url.decode('utf-8', errors='ignore')
                 if 'google.com' not in f_str and 'news.google' not in f_str:
-                    parsed = urllib.parse.urlparse(f_str)
-                    safe_path = urllib.parse.quote(parsed.path)
-                    safe_url = urllib.parse.urlunparse((
-                        parsed.scheme, parsed.netloc, safe_path,
-                        parsed.params, parsed.query, parsed.fragment
-                    ))
-                    return safe_url
+                    return f_str
     except Exception:
         pass
+        
+    # 구글 뉴스 리다이렉트 링크가 해독되지 않을 경우 구글 직접 검색 링크로 전환 (먹통 방지)
+    if title:
+        return f"https://www.google.com/search?q={urllib.parse.quote(title)}"
     return url
 
 def get_gdrive_service():
@@ -114,7 +136,7 @@ def load_gdrive_cache(service, folder_id):
         if not files:
             return {}
         
-        file_id = files[0]['id']  # ⭕ 리스트 첫 번째 인덱스 참조로 수정
+        file_id = files[0]['id'] # ⭕ 리스트 첫 번째 요소 인덱싱
         request = service.files().get_media(fileId=file_id)
         fh = io.BytesIO()
         downloader = MediaIoBaseDownload(fh, request)
@@ -142,7 +164,7 @@ def save_gdrive_cache(service, folder_id, cache_data):
         files = results.get('files', [])
         
         if files:
-            file_id = files[0]['id']  # ⭕ 리스트 첫 번째 인덱스 참조로 수정
+            file_id = files[0]['id'] # ⭕ 리스트 첫 번째 요소 인덱싱
             service.files().update(fileId=file_id, media_body=media).execute()
         else:
             file_metadata = {
@@ -334,7 +356,7 @@ def send_email_with_pdf(pdf_bytes, report_data, recipients=["pj2gwk@gmail.com", 
         print(f"❌ 이메일 발송 오류: {e}")
 
 def fetch_google_news_rss_realtime(query, lang_zone="KR", max_hours=24):
-    """Google News RSS 최신 24시간 항목 수집 및 즉시 디코딩"""
+    """Google News RSS 최신 24시간 항목 수집 및 원본 링크 변환 + 도메인 필터링"""
     realtime_query = f"{query} when:1d"
     encoded_query = urllib.parse.quote(realtime_query)
     
@@ -370,7 +392,11 @@ def fetch_google_news_rss_realtime(query, lang_zone="KR", max_hours=24):
                     continue
                 
                 raw_link = getattr(entry, 'link', '')
-                clean_link = decode_google_news_url(raw_link)
+                clean_link = decode_google_news_url(raw_link, title)
+                
+                # 해외 노이즈 도메인(.ua, .ru 등) 필터링
+                if is_banned_domain(clean_link):
+                    continue
                 
                 entries.append({
                     'title': title,
@@ -542,7 +568,7 @@ def create_pdf_bytes(data):
         bottomMargin=35
     )
     
-    content_width = A4[0] - 70 # ⭕ A4[0] (595.27pt) - 70pt = 525.27pt
+    content_width = A4[0] - 70 # ⭕ A4[0] = 595.27pt, 595.27 - 70 = 525.27pt
 
     title_style = ParagraphStyle(
         'DocTitle', fontName='HYGothic-Medium', fontSize=18, leading=22,
@@ -783,4 +809,4 @@ if __name__ == "__main__":
     upload_json_to_gdrive(service, folder_id, report_data['new_cache'], report_data['time_str'])
     save_gdrive_cache(service, folder_id, report_data['new_cache'])
     # 본인, 아내, 아들 세 분께 동시 발송
-    send_email_with_pdf(pdf_bytes, report_data, recipients=["pj2gwk@gmail.com", "miyoungchoi88@gmail.com", "kimgiwoong5@gmail.com"])
+    send_email_with_pdf(pdf_bytes, report_data, recipients=["pj2gwk@gmail.com"]

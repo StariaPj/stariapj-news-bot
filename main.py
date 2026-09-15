@@ -85,7 +85,7 @@ def load_gdrive_cache(service, folder_id):
         if not files:
             return {}
         
-        file_id = files['id']
+        file_id = files[0]['id']
         request = service.files().get_media(fileId=file_id)
         fh = io.BytesIO()
         downloader = MediaIoBaseDownload(fh, request)
@@ -113,7 +113,7 @@ def save_gdrive_cache(service, folder_id, cache_data):
         files = results.get('files', [])
         
         if files:
-            file_id = files['id']
+            file_id = files[0]['id']
             service.files().update(fileId=file_id, media_body=media).execute()
         else:
             file_metadata = {
@@ -270,8 +270,8 @@ def generate_html_email_body(data):
     """
     return html
 
-def send_email_with_pdf(pdf_bytes, report_data, recipients=["pj2gwk@gmail.com", "miyoungchoi88@gmail.com"]):
-    """지정된 수신자들에게 링크가 포함된 HTML 이메일 및 PDF 첨부파일 동시 발송"""
+def send_email_with_pdf(pdf_bytes, report_data, recipients=["pj2gwk@gmail.com", "miyoungchoi88@gmail.com", "kimgiwoong5@gmail.com"]):
+    """지정된 수신자들(본인, 아내, 아들)에게 링크가 포함된 HTML 이메일 및 PDF 첨부파일 동시 발송"""
     sender_user = os.environ.get("EMAIL_USER")
     sender_pass = os.environ.get("EMAIL_PASS")
 
@@ -286,7 +286,7 @@ def send_email_with_pdf(pdf_bytes, report_data, recipients=["pj2gwk@gmail.com", 
         msg['To'] = ", ".join(recipients)
         msg['Subject'] = f"[StariaPj] 온타임 24시간 실시간 소식지 ({time_str} KST)"
 
-        # 1. HTML 이메일 본문 생성 (클릭 시 새 창 이동 하이퍼링크 적용)
+        # 1. HTML 이메일 본문 생성
         html_body = generate_html_email_body(report_data)
         msg.attach(MIMEText(html_body, 'html', 'utf-8'))
 
@@ -510,7 +510,7 @@ def create_pdf_bytes(data):
         bottomMargin=35
     )
     
-    content_width = A4 - 70 # 525.27pt
+    content_width = A4[0] - 70 # 525.27pt
 
     title_style = ParagraphStyle(
         'DocTitle', fontName='HYGothic-Medium', fontSize=18, leading=22,
@@ -639,7 +639,6 @@ def create_pdf_bytes(data):
                 link_url = item.get('link', '')
                 clean_t = clean_text(item['title'])
                 
-                # PDF 하이퍼링크 태그 적용
                 title_text = f'<a href="{link_url}">{clean_t}</a>' if link_url else clean_t
                 
                 if idx == 0:
@@ -751,5 +750,5 @@ if __name__ == "__main__":
     upload_to_gdrive(service, folder_id, pdf_bytes, report_data['time_str'])
     upload_json_to_gdrive(service, folder_id, report_data['new_cache'], report_data['time_str'])
     save_gdrive_cache(service, folder_id, report_data['new_cache'])
-     # 남편(pj2gwk@gmail.com) 및 아내(miyoungchoi88@gmail.com) , 아들 (kimgiwoong5@gmail.com) 세 분께 동시 발송
+    # 본인, 아내, 아들 세 분께 동시 발송
     send_email_with_pdf(pdf_bytes, report_data, recipients=["pj2gwk@gmail.com", "miyoungchoi88@gmail.com", "kimgiwoong5@gmail.com"])

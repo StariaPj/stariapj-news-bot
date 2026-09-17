@@ -74,6 +74,57 @@ def is_banned_domain(url):
         pass
     return False
 
+def translate_to_korean(text):
+    """영문/해외 기사 제목을 구글 번역 API를 통해 초고속 한글 자동 번역"""
+    if not text:
+        return ""
+    
+    # 이미 완전 한글인 경우 번역 스킵
+    has_korean = bool(re.search(r'[가-힣]', text))
+    has_english = bool(re.search(r'[a-zA-Z]{4,}', text))
+    if has_korean and not has_english:
+        return text
+
+    try:
+        url = f"https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=ko&dt=t&q={urllib.parse.quote(text)}"
+        res = requests.get(url, timeout=3)
+        if res.status_code == 200:
+            data = res.json()
+            translated = "".join([item[0] for item in data[0] if item[0]])
+            if translated:
+                return translated
+    except Exception:
+        pass
+    return text
+
+def detect_country_tag(title_raw, title_ko="", lang_zone=""):
+    """
+    기사 헤드라인 태그 판별 함수:
+    - ZA : 남아공 관련 소식
+    - KR : 한국 관련 소식
+    - No : 제3국 / 기타 소식 (Neither -> No 간략화)
+    """
+    combined = (title_raw + " " + title_ko).lower()
+    
+    za_keywords = ["남아공", "south africa", "케이프", "cape town", "gauteng", "요하네스버그", "johannesburg", "western cape", "stellenbosch", "pretoria", "durban"]
+    kr_keywords = ["한국", "대한민국", "korea", "서울", "seoul", "부산", "busan", "제주", "jeju", "k-", "olle"]
+    
+    has_za = any(k in combined for k in za_keywords)
+    has_kr = any(k in combined for k in kr_keywords)
+    
+    if has_za and not has_kr:
+        return "ZA"
+    elif has_kr and not has_za:
+        return "KR"
+    elif has_za and has_kr:
+        return "ZA" if lang_zone == "ZA" else "KR"
+    else:
+        if lang_zone == "ZA":
+            return "ZA"
+        elif lang_zone == "KR":
+            return "KR"
+        return "No"
+
 def decode_google_news_url(url, title=""):
     """구글 뉴스 RSS 링크(Base64/Protobuf)에서 실제 언론사 원본 주소를 초고속 내장 디코딩.
     실패 시 구글 검색 링크로 안전 전환하여 100% 정상 연결 보장.
@@ -287,9 +338,10 @@ def generate_html_email_body(data):
     if data.get('shorts_top3'):
         for idx, item in enumerate(data['shorts_top3'], 1):
             score_info = f" (Bot Score: {item.get('bot_score', 0)}pt | {item.get('priority_label', '')})"
+            disp_title = html.escape(item.get('display_title', item['title']))
             html_code += f"""
             <div class="card">
-              <div class="card-title">{idx}. [{item['category']}] {html.escape(item['title'])}{score_info}</div>
+              <div class="card-title">{idx}. [{item['category']}] {disp_title}{score_info}</div>
               <div class="card-reason">💡 <b>추천 이유:</b> <i>{html.escape(item['reason'])}</i></div>
               <div class="card-hook">🎯 <b>3초 Hook 멘트:</b> {html.escape(item.get('hook', ''))}</div>
               <div class="card-script">⏱️ <b>30초 대본 개요:</b> {html.escape(item.get('script', ''))}</div>
@@ -320,17 +372,17 @@ def generate_html_email_body(data):
             for idx, item in enumerate(items):
                 color = GRADIENT_COLORS[min(idx, len(GRADIENT_COLORS)-1)]
                 link_url = html.escape(item.get('link', '#'))
-                title_txt = html.escape(item['title'])
+                disp_title = html.escape(item.get('display_title', item['title']))
                 
                 if idx == 0:
                     tag_txt = "[🔥TOP]" if is_alert else "[⭐TOP]"
                     tag_color = "#C53030" if is_alert else "#2B6CB0"
                     tag_html = f'<span style="color: {tag_color}; font-weight: bold;">{tag_txt}</span>'
-                    title_html = f'<a href="{link_url}" target="_blank" class="item-link" style="font-weight: bold; color: {color};">{title_txt}</a>'
+                    title_html = f'<a href="{link_url}" target="_blank" class="item-link" style="font-weight: bold; color: {color};">{disp_title}</a>'
                 else:
                     tag_txt = "[속보]" if key == 'breaking' else ("[특가]" if key == 'flights' else "[소식]")
                     tag_html = f'<span style="color: {color};">{tag_txt}</span>'
-                    title_html = f'<a href="{link_url}" target="_blank" class="item-link" style="color: {color};">{title_txt}</a>'
+                    title_html = f'<a href="{link_url}" target="_blank" class="item-link" style="color: {color};">{disp_title}</a>'
                     
                 html_code += f"""
                 <tr class="item-row">
@@ -347,11 +399,15 @@ def generate_html_email_body(data):
         html_code += '<table class="item-table">'
         for idx, vid in enumerate(data['yt_videos']):
             color = GRADIENT_COLORS[min(idx, len(GRADIENT_COLORS)-1)]
-            v_title = html.escape(vid['snippet']['title'])
+            v_title_raw = vid['snippet']['title']
+            v_title_ko = translate_to_korean(v_title_raw)
+            v_tag = detect_country_tag(v_title_raw, v_title_ko)
+            v_disp = f"[{v_tag}] {v_title_ko}"
+            
             v_id = vid.get('id', {}).get('videoId', '')
             v_url = f"https://www.youtube.com/watch?v={v_id}" if v_id else "#"
             
-            title_html = f'<a href="{v_url}" target="_blank" class="item-link" style="color: {color};">{v_title}</a>'
+            title_html = f'<a href="{v_url}" target="_blank" class="item-link" style="color: {color};">{html.escape(v_disp)}</a>'
             
             html_code += f"""
             <tr class="item-row">
@@ -409,7 +465,7 @@ def send_email_with_pdf(pdf_bytes, report_data, recipients=None):
         print(f"❌ 이메일 발송 오류: {e}")
 
 def fetch_google_news_rss_realtime(query, lang_zone="KR", max_hours=24):
-    """Google News RSS 최신 24시간 항목 수집 및 원본 링크 변환 + 도메인 필터링"""
+    """Google News RSS 최신 24시간 항목 수집 및 원본 링크 변환 + 자동 한글 번역 및 국가 태그([ZA]/[KR]/[No]) 생성"""
     realtime_query = f"{query} when:1d"
     encoded_query = urllib.parse.quote(realtime_query)
     
@@ -427,9 +483,9 @@ def fetch_google_news_rss_realtime(query, lang_zone="KR", max_hours=24):
             cutoff_dt = now_utc - timedelta(hours=max_hours)
             
             for entry in feed.entries:
-                title = getattr(entry, 'title', '')
+                raw_title = getattr(entry, 'title', '')
                 
-                if is_banned_title(title):
+                if is_banned_title(raw_title):
                     continue
                 
                 pub_dt = None
@@ -445,13 +501,25 @@ def fetch_google_news_rss_realtime(query, lang_zone="KR", max_hours=24):
                     continue
                 
                 raw_link = getattr(entry, 'link', '')
-                clean_link = decode_google_news_url(raw_link, title)
+                clean_link = decode_google_news_url(raw_link, raw_title)
                 
                 if is_banned_domain(clean_link):
                     continue
                 
+                # 1. 헤드라인 자동 한글 번역
+                title_ko = translate_to_korean(raw_title)
+                
+                # 2. 국가 태그 산출 ([ZA], [KR], [No])
+                country_tag = detect_country_tag(raw_title, title_ko, lang_zone)
+                
+                # 3. 최종표기 제목 생성 ([태그] 한글제목)
+                display_title = f"[{country_tag}] {title_ko}"
+                
                 entries.append({
-                    'title': title,
+                    'title': raw_title,
+                    'title_ko': title_ko,
+                    'country_tag': country_tag,
+                    'display_title': display_title,
                     'link': clean_link,
                     'pub_ts': pub_dt.timestamp()
                 })
@@ -497,6 +565,13 @@ def merge_and_filter_entries(new_entries, cached_entries, max_hours=24, limit=10
         if is_banned_title(title):
             continue
         if c.get('pub_ts', 0) >= cutoff_ts:
+            # 기존 캐시 항목에 display_title이 없는 경우 보완
+            if 'display_title' not in c:
+                t_ko = c.get('title_ko', translate_to_korean(title))
+                c_tag = c.get('country_tag', detect_country_tag(title, t_ko))
+                c['title_ko'] = t_ko
+                c['country_tag'] = c_tag
+                c['display_title'] = f"[{c_tag}] {t_ko}"
             combined_dict[title] = c
             
     for n in new_entries:
@@ -559,19 +634,22 @@ def select_top_shorts_topics(data):
     for sec_key, category_name, reason_fmt, hook_fmt, script_fmt in sections_mapping:
         items = data.get(sec_key, [])
         for item in items:
-            title = item.get('title', '')
-            if not title or title in seen_titles:
+            raw_t = item.get('title', '')
+            if not raw_t or raw_t in seen_titles:
                 continue
-            seen_titles.add(title)
+            seen_titles.add(raw_t)
+            
+            disp_t = item.get('display_title', raw_t)
             
             # stariapj-new-bot 가중치 계산
-            region_score, priority_label = evaluate_stariapj_region_score(title)
-            trends_score, is_breakout = calculate_google_trends_score(title)
+            region_score, priority_label = evaluate_stariapj_region_score(raw_t)
+            trends_score, is_breakout = calculate_google_trends_score(raw_t)
             bot_score = round((0.5 * region_score) + (0.5 * trends_score), 2)
             
             candidates.append({
                 'category': category_name,
-                'title': title,
+                'title': raw_t,
+                'display_title': disp_t,
                 'reason': f"{reason_fmt} ({priority_label})",
                 'hook': hook_fmt,
                 'script': script_fmt,
@@ -644,7 +722,6 @@ def create_pdf_bytes(data):
         buffer, pagesize=A4, leftMargin=35, rightMargin=35, topMargin=35, bottomMargin=35
     )
     
-    # ReportLab의 A4는 (width, height) 튜플입니다. A4[0]을 사용하여 가로 너비를 구합니다.
     content_width = A4[0] - 70
 
     title_style = ParagraphStyle(
@@ -699,7 +776,7 @@ def create_pdf_bytes(data):
 
     if data['shorts_top3']:
         for idx, item in enumerate(data['shorts_top3'], 1):
-            clean_t = clean_text(item['title'])
+            clean_t = clean_text(item.get('display_title', item['title']))
             clean_r = clean_text(item['reason'])
             clean_hk = clean_text(item.get('hook', ''))
             clean_sc = clean_text(item.get('script', ''))
@@ -773,7 +850,7 @@ def create_pdf_bytes(data):
             for idx, item in enumerate(items):
                 color_hex = GRADIENT_COLORS[min(idx, len(GRADIENT_COLORS)-1)]
                 link_url = html.escape(item.get('link', ''))
-                clean_t = clean_text(item['title'])
+                clean_t = clean_text(item.get('display_title', item['title']))
                 
                 title_text = f'<a href="{link_url}">{clean_t}</a>' if link_url else clean_t
                 
@@ -821,11 +898,15 @@ def create_pdf_bytes(data):
         yt_rows = []
         for idx, vid in enumerate(data['yt_videos']):
             color_hex = GRADIENT_COLORS[min(idx, len(GRADIENT_COLORS)-1)]
-            v_title = clean_text(vid['snippet']['title'])
+            v_title_raw = vid['snippet']['title']
+            v_title_ko = translate_to_korean(v_title_raw)
+            v_tag = detect_country_tag(v_title_raw, v_title_ko)
+            v_disp = clean_text(f"[{v_tag}] {v_title_ko}")
+            
             v_id = vid.get('id', {}).get('videoId', '')
             v_url = f"https://www.youtube.com/watch?v={v_id}" if v_id else ""
             
-            title_text = f'<a href="{v_url}">{v_title}</a>' if v_url else v_title
+            title_text = f'<a href="{v_url}">{v_disp}</a>' if v_url else v_disp
             
             p_tag = Paragraph("[Shorts]", ParagraphStyle(f'YTag_{idx}', fontName='HYGothic-Medium', fontSize=8.5, leading=12, textColor=colors.HexColor(color_hex)))
             p_body = Paragraph(title_text, ParagraphStyle(f'YBody_{idx}', fontName='HYGothic-Medium', fontSize=8.5, leading=13, textColor=colors.HexColor(color_hex)))

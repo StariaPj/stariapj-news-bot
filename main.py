@@ -74,40 +74,89 @@ def is_banned_domain(url):
         pass
     return False
 
+def clean_source_signature(title):
+    """제목 뒤에 붙는 언론사명(- SABC News, - News24 등) 제거하여 번역 정밀도 향상"""
+    if not title:
+        return ""
+    # 기존 [ZA], [KR], [NO], [ZR] 등 모든 브라켓 태그 제거
+    cleaned = re.sub(r'^\s*\[(ZA|KR|NO|No|ZR)\]\s*', '', title, flags=re.IGNORECASE)
+    # 언론사 서명 제거 (- SABC News 등)
+    cleaned_body = re.sub(r'\s*-\s*[A-Za-z0-9\s]+$', '', cleaned)
+    return cleaned_body.strip() if cleaned_body.strip() else cleaned.strip()
+
 def translate_to_korean(text):
-    """영문/해외 기사 제목을 구글 번역 API를 통해 초고속 한글 자동 번역"""
+    """영문/해외 기사 제목을 다중 번역 엔진(Google GTX, Chrome Ext, MyMemory)을 통해 100% 한글 자동 번역"""
     if not text:
         return ""
     
-    # 이미 완전 한글인 경우 번역 스킵
-    has_korean = bool(re.search(r'[가-힣]', text))
-    has_english = bool(re.search(r'[a-zA-Z]{4,}', text))
-    if has_korean and not has_english:
-        return text
+    # 태그 및 언론사 서명 정리
+    clean_text_input = clean_source_signature(text)
+    
+    # 이미 70% 이상 한글인 경우 번역 스킵
+    korean_chars = len(re.findall(r'[가-힣]', clean_text_input))
+    total_alpha = len(re.findall(r'[a-zA-Z가-힣]', clean_text_input))
+    if total_alpha > 0 and (korean_chars / total_alpha) > 0.7:
+        return clean_text_input
 
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
+    }
+    encoded_text = urllib.parse.quote(clean_text_input)
+
+    # 시도 1: Google GTX Endpoint (User-Agent 포함)
     try:
-        url = f"https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=ko&dt=t&q={urllib.parse.quote(text)}"
-        res = requests.get(url, timeout=3)
-        if res.status_code == 200:
-            data = res.json()
-            translated = "".join([item[0] for item in data[0] if item[0]])
-            if translated:
-                return translated
+        url1 = f"https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=ko&dt=t&q={encoded_text}"
+        res1 = requests.get(url1, headers=headers, timeout=5)
+        if res1.status_code == 200:
+            data1 = res1.json()
+            translated1 = "".join([item[0] for item in data1[0] if item[0]])
+            if translated1 and bool(re.search(r'[가-힣]', translated1)):
+                return translated1.strip()
     except Exception:
         pass
-    return text
+
+    # 시도 2: Google Chrome Extension Translate Endpoint
+    try:
+        url2 = f"https://clients5.google.com/translate_a/t?client=dict-chrome-ex&sl=auto&tl=ko&q={encoded_text}"
+        res2 = requests.get(url2, headers=headers, timeout=5)
+        if res2.status_code == 200:
+            data2 = res2.json()
+            if isinstance(data2, list) and len(data2) > 0:
+                translated2 = data2[0]
+                if isinstance(translated2, list) and len(translated2) > 0:
+                    translated2 = translated2[0]
+                if isinstance(translated2, str) and bool(re.search(r'[가-힣]', translated2)):
+                    return translated2.strip()
+    except Exception:
+        pass
+
+    # 시도 3: MyMemory Translation API
+    try:
+        url3 = f"https://api.mymemory.translated.net/get?q={encoded_text}&langpair=en|ko"
+        res3 = requests.get(url3, headers=headers, timeout=5)
+        if res3.status_code == 200:
+            data3 = res3.json()
+            translated3 = data3.get('responseData', {}).get('translatedText', '')
+            if translated3 and bool(re.search(r'[가-힣]', translated3)):
+                return translated3.strip()
+    except Exception:
+        pass
+
+    return clean_text_input
 
 def detect_country_tag(title_raw, title_ko="", lang_zone=""):
     """
-    기사 헤드라인 태그 판별 함수:
+    기사 헤드라인 태그 산출 함수 (반드시 [ZA], [KR], [NO] 중 하나만 정밀 반환):
     - ZA : 남아공 관련 소식
     - KR : 한국 관련 소식
-    - No : 제3국 / 기타 소식 (Neither -> No 간략화)
+    - NO : 제3국 / 기타 소식
     """
-    combined = (title_raw + " " + title_ko).lower()
+    clean_raw = clean_source_signature(title_raw)
+    clean_ko = clean_source_signature(title_ko)
+    combined = (clean_raw + " " + clean_ko).lower()
     
-    za_keywords = ["남아공", "south africa", "케이프", "cape town", "gauteng", "요하네스버그", "johannesburg", "western cape", "stellenbosch", "pretoria", "durban"]
-    kr_keywords = ["한국", "대한민국", "korea", "서울", "seoul", "부산", "busan", "제주", "jeju", "k-", "olle"]
+    za_keywords = ["남아공", "south africa", "케이프", "cape town", "gauteng", "요하네스버그", "johannesburg", "western cape", "stellenbosch", "pretoria", "durban", "ekurhuleni", "sabc", "rand", "zuma", "ramaphosa", "eff", "anc"]
+    kr_keywords = ["한국", "대한민국", "korea", "서울", "seoul", "부산", "busan", "제주", "jeju", "k-", "olle", "윤석열", "이재명", "국회", "원화"]
     
     has_za = any(k in combined for k in za_keywords)
     has_kr = any(k in combined for k in kr_keywords)
@@ -123,7 +172,16 @@ def detect_country_tag(title_raw, title_ko="", lang_zone=""):
             return "ZA"
         elif lang_zone == "KR":
             return "KR"
-        return "No"
+        return "NO"
+
+def format_display_title(country_tag, title_ko):
+    """최종 헤드라인을 '[태그] 한글제목' 양식으로 정밀 포맷팅"""
+    tag = country_tag.upper() if country_tag else "NO"
+    if tag not in ["ZA", "KR", "NO"]:
+        tag = "NO"
+        
+    clean_ko = re.sub(r'^\s*\[(ZA|KR|NO|No|ZR)\]\s*', '', title_ko, flags=re.IGNORECASE).strip()
+    return f"[{tag}] {clean_ko}"
 
 def decode_google_news_url(url, title=""):
     """구글 뉴스 RSS 링크(Base64/Protobuf)에서 실제 언론사 원본 주소를 초고속 내장 디코딩.
@@ -142,7 +200,7 @@ def decode_google_news_url(url, title=""):
             padded_b64 = b64_str + '=' * (-len(b64_str) % 4)
             decoded_bytes = base64.urlsafe_b64decode(padded_b64)
             
-            found_urls = re.findall(rb'https?://[a-zA-Z0-9\.\-_~:/?#\\[\\]@!$&\'()*+,;=%]+', decoded_bytes)
+            found_urls = re.findall(rb'https?://[a-zA-Z0-9\.\-_~:/?#\[\]@!$&'()*+,;=%]+', decoded_bytes)
             for f_url in found_urls:
                 f_str = f_url.decode('utf-8', errors='ignore')
                 if 'google.com' not in f_str and 'news.google' not in f_str:
@@ -164,7 +222,7 @@ def evaluate_stariapj_region_score(title, text=""):
     """
     full_text = (title + " " + text).lower()
     
-    has_za = any(k in full_text for k in ["남아공", "south africa", "케이프", "cape town", "gauteng", "요하네스버그", "johannesburg", "western cape", "stellenbosch"])
+    has_za = any(k in full_text for k in ["남아공", "south africa", "케이프", "cape town", "gauteng", "요하네스버그", "johannesburg", "western cape", "stellenbosch", "ekurhuleni", "sabc"])
     has_kr = any(k in full_text for k in ["한국", "대한민국", "korea", "서울", "seoul", "부산", "busan", "제주", "jeju", "k-", "olle"])
     has_africa = any(k in full_text for k in ["아프리카", "africa", "나이지리아", "nigeria", "케냐", "kenya", "가나", "ghana", "탄자니아", "tanzania", "이집트", "egypt", "모로코", "morocco"])
     has_asia = any(k in full_text for k in ["아시아", "asia", "몽골", "mongolia", "일본", "japan", "중국", "china", "베트남", "vietnam", "동남아"])
@@ -402,7 +460,7 @@ def generate_html_email_body(data):
             v_title_raw = vid['snippet']['title']
             v_title_ko = translate_to_korean(v_title_raw)
             v_tag = detect_country_tag(v_title_raw, v_title_ko)
-            v_disp = f"[{v_tag}] {v_title_ko}"
+            v_disp = format_display_title(v_tag, v_title_ko)
             
             v_id = vid.get('id', {}).get('videoId', '')
             v_url = f"https://www.youtube.com/watch?v={v_id}" if v_id else "#"
@@ -465,7 +523,7 @@ def send_email_with_pdf(pdf_bytes, report_data, recipients=None):
         print(f"❌ 이메일 발송 오류: {e}")
 
 def fetch_google_news_rss_realtime(query, lang_zone="KR", max_hours=24):
-    """Google News RSS 최신 24시간 항목 수집 및 원본 링크 변환 + 자동 한글 번역 및 국가 태그([ZA]/[KR]/[No]) 생성"""
+    """Google News RSS 최신 24시간 항목 수집 및 원본 링크 변환 + 자동 한글 번역 및 국가 태그([ZA]/[KR]/[NO]) 생성"""
     realtime_query = f"{query} when:1d"
     encoded_query = urllib.parse.quote(realtime_query)
     
@@ -509,11 +567,11 @@ def fetch_google_news_rss_realtime(query, lang_zone="KR", max_hours=24):
                 # 1. 헤드라인 자동 한글 번역
                 title_ko = translate_to_korean(raw_title)
                 
-                # 2. 국가 태그 산출 ([ZA], [KR], [No])
+                # 2. 국가 태그 산출 ([ZA], [KR], [NO])
                 country_tag = detect_country_tag(raw_title, title_ko, lang_zone)
                 
                 # 3. 최종표기 제목 생성 ([태그] 한글제목)
-                display_title = f"[{country_tag}] {title_ko}"
+                display_title = format_display_title(country_tag, title_ko)
                 
                 entries.append({
                     'title': raw_title,
@@ -561,26 +619,46 @@ def merge_and_filter_entries(new_entries, cached_entries, max_hours=24, limit=10
     combined_dict = {}
 
     for c in cached_entries:
-        title = c.get('title', '')
-        if is_banned_title(title):
+        raw_title = c.get('title', '')
+        if is_banned_title(raw_title):
             continue
         if c.get('pub_ts', 0) >= cutoff_ts:
-            # 기존 캐시 항목에 display_title이 없는 경우 보완
-            if 'display_title' not in c:
-                t_ko = c.get('title_ko', translate_to_korean(title))
-                c_tag = c.get('country_tag', detect_country_tag(title, t_ko))
-                c['title_ko'] = t_ko
-                c['country_tag'] = c_tag
-                c['display_title'] = f"[{c_tag}] {t_ko}"
-            combined_dict[title] = c
+            clean_raw = clean_source_signature(raw_title)
+            t_ko = c.get('title_ko', '')
+            clean_ko = clean_source_signature(t_ko) if t_ko else ''
             
+            # 한글이 포함되어 있지 않거나 영문 단어가 많을 경우 재번역
+            eng_words = len(re.findall(r'[a-zA-Z]{3,}', clean_ko))
+            if not clean_ko or eng_words > 2:
+                clean_ko = translate_to_korean(clean_raw)
+                
+            c_tag = detect_country_tag(clean_raw, clean_ko)
+            c['title'] = clean_raw
+            c['title_ko'] = clean_ko
+            c['country_tag'] = c_tag
+            c['display_title'] = format_display_title(c_tag, clean_ko)
+            combined_dict[clean_raw] = c
+
     for n in new_entries:
-        title = n.get('title', '')
-        if is_banned_title(title):
+        raw_title = n.get('title', '')
+        if is_banned_title(raw_title):
             continue
         if n.get('pub_ts', 0) >= cutoff_ts:
-            combined_dict[title] = n
+            clean_raw = clean_source_signature(raw_title)
+            t_ko = n.get('title_ko', '')
+            clean_ko = clean_source_signature(t_ko) if t_ko else ''
             
+            eng_words = len(re.findall(r'[a-zA-Z]{3,}', clean_ko))
+            if not clean_ko or eng_words > 2:
+                clean_ko = translate_to_korean(clean_raw)
+                
+            c_tag = n.get('country_tag', detect_country_tag(clean_raw, clean_ko))
+            n['title'] = clean_raw
+            n['title_ko'] = clean_ko
+            n['country_tag'] = c_tag
+            n['display_title'] = format_display_title(c_tag, clean_ko)
+            combined_dict[clean_raw] = n
+
     sorted_items = sorted(combined_dict.values(), key=lambda x: x['pub_ts'], reverse=True)
     return sorted_items[:limit]
 
@@ -901,12 +979,12 @@ def create_pdf_bytes(data):
             v_title_raw = vid['snippet']['title']
             v_title_ko = translate_to_korean(v_title_raw)
             v_tag = detect_country_tag(v_title_raw, v_title_ko)
-            v_disp = clean_text(f"[{v_tag}] {v_title_ko}")
+            v_disp = format_display_title(v_tag, v_title_ko)
             
             v_id = vid.get('id', {}).get('videoId', '')
             v_url = f"https://www.youtube.com/watch?v={v_id}" if v_id else ""
             
-            title_text = f'<a href="{v_url}">{v_disp}</a>' if v_url else v_disp
+            title_text = f'<a href="{v_url}">{clean_text(v_disp)}</a>' if v_url else clean_text(v_disp)
             
             p_tag = Paragraph("[Shorts]", ParagraphStyle(f'YTag_{idx}', fontName='HYGothic-Medium', fontSize=8.5, leading=12, textColor=colors.HexColor(color_hex)))
             p_body = Paragraph(title_text, ParagraphStyle(f'YBody_{idx}', fontName='HYGothic-Medium', fontSize=8.5, leading=13, textColor=colors.HexColor(color_hex)))

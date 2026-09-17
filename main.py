@@ -200,7 +200,7 @@ def decode_google_news_url(url, title=""):
             padded_b64 = b64_str + '=' * (-len(b64_str) % 4)
             decoded_bytes = base64.urlsafe_b64decode(padded_b64)
             
-            found_urls = re.findall(rb'https?://[a-zA-Z0-9\.\-_~:/?#\[\]@!$&'()*+,;=%]+', decoded_bytes)
+            found_urls = re.findall(rb"https?://[a-zA-Z0-9\.\-_~:/?#\[\]@!$&'()*+,;=%]+", decoded_bytes)
             for f_url in found_urls:
                 f_str = f_url.decode('utf-8', errors='ignore')
                 if 'google.com' not in f_str and 'news.google' not in f_str:

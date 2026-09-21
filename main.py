@@ -367,6 +367,7 @@ def upload_json_to_gdrive(service, folder_id, cache_data, time_str):
     except Exception as e:
         print(f"⚠️ JSON 데이터 파일 업로드 실패: {e}")
 
+
 def generate_html_email_body(data):
     """제목 클릭 시 별도 창(target='_blank')에서 원본 언론사 소스로 이동하는 HTML 이메일 본문 생성"""
     html_code = f"""
@@ -403,19 +404,22 @@ def generate_html_email_body(data):
 <body>
   <div class="container">
     <div class="title">StariaPj 온타임 24시간 긴급속보 &amp; Shorts 제작 리포트</div>
-    <div class="subtitle">발행 일시: {data['now_kst_str']} (KST) | stariapj-new-bot 가중치 알고리즘(StariaPj 4지역 + Google Trends) 반영</div>
+    <div class="subtitle">발행 일시: {data['now_kst_str']} (KST) | 최근 24시간 유효 소식 및 숏츠 대본 가이드</div>
     <hr class="divider">
     
-    <div class="shorts-box">🎬 [필수 제작] stariapj-new-bot 자동 선정 Shorts TOP 3</div>
+    <div class="shorts-box">🎬 [필수 제작] 지금 당장 쇼츠(Shorts)로 만들어야 하는 주제 TOP 3</div>
 """
 
     if data.get('shorts_top3'):
         for idx, item in enumerate(data['shorts_top3'], 1):
-            score_info = f" (Bot Score: {item.get('bot_score', 0)}pt | {item.get('priority_label', '')})"
-            disp_title = html.escape(item.get('display_title', item['title']))
+            link_url = html.escape(item.get('link', '#'))
+            title_txt = html.escape(item['title'])
+            # 👈 쇼츠 제목 클릭 시 원본 기사로 이동하는 <a> 태그 생성
+            title_html = f'<a href="{link_url}" target="_blank" class="item-link" style="color: #2D3748; text-decoration: underline;">{title_txt}</a>' if link_url and link_url != '#' else title_txt
+
             html_code += f"""
             <div class="card">
-              <div class="card-title">{idx}. [{item['category']}] {disp_title}{score_info}</div>
+              <div class="card-title">{idx}. [{item['category']}] {title_html}</div>
               <div class="card-reason">💡 <b>추천 이유:</b> <i>{html.escape(item['reason'])}</i></div>
               <div class="card-hook">🎯 <b>3초 Hook 멘트:</b> {html.escape(item.get('hook', ''))}</div>
               <div class="card-script">⏱️ <b>30초 대본 개요:</b> {html.escape(item.get('script', ''))}</div>
@@ -446,17 +450,17 @@ def generate_html_email_body(data):
             for idx, item in enumerate(items):
                 color = GRADIENT_COLORS[min(idx, len(GRADIENT_COLORS)-1)]
                 link_url = html.escape(item.get('link', '#'))
-                disp_title = html.escape(item.get('display_title', item['title']))
+                title_txt = html.escape(item['title'])
                 
                 if idx == 0:
                     tag_txt = "[🔥TOP]" if is_alert else "[⭐TOP]"
                     tag_color = "#C53030" if is_alert else "#2B6CB0"
                     tag_html = f'<span style="color: {tag_color}; font-weight: bold;">{tag_txt}</span>'
-                    title_html = f'<a href="{link_url}" target="_blank" class="item-link" style="font-weight: bold; color: {color};">{disp_title}</a>'
+                    title_html = f'<a href="{link_url}" target="_blank" class="item-link" style="font-weight: bold; color: {color};">{title_txt}</a>'
                 else:
                     tag_txt = "[속보]" if key == 'breaking' else ("[특가]" if key == 'flights' else "[소식]")
                     tag_html = f'<span style="color: {color};">{tag_txt}</span>'
-                    title_html = f'<a href="{link_url}" target="_blank" class="item-link" style="color: {color};">{disp_title}</a>'
+                    title_html = f'<a href="{link_url}" target="_blank" class="item-link" style="color: {color};">{title_txt}</a>'
                     
                 html_code += f"""
                 <tr class="item-row">
@@ -473,15 +477,11 @@ def generate_html_email_body(data):
         html_code += '<table class="item-table">'
         for idx, vid in enumerate(data['yt_videos']):
             color = GRADIENT_COLORS[min(idx, len(GRADIENT_COLORS)-1)]
-            v_title_raw = vid['snippet']['title']
-            v_title_ko = translate_to_korean(v_title_raw)
-            v_tag = detect_country_tag(v_title_raw, v_title_ko)
-            v_disp = format_display_title(v_tag, v_title_ko)
-            
+            v_title = html.escape(vid['snippet']['title'])
             v_id = vid.get('id', {}).get('videoId', '')
             v_url = f"https://www.youtube.com/watch?v={v_id}" if v_id else "#"
             
-            title_html = f'<a href="{v_url}" target="_blank" class="item-link" style="color: {color};">{html.escape(v_disp)}</a>'
+            title_html = f'<a href="{v_url}" target="_blank" class="item-link" style="color: {color};">{v_title}</a>'
             
             html_code += f"""
             <tr class="item-row">
@@ -497,6 +497,10 @@ def generate_html_email_body(data):
 </html>
 """
     return html_code
+
+
+
+
 
 def send_email_with_pdf(pdf_bytes, report_data, recipients=None):
     """지정된 수신자들에게 원본 링크가 적용된 HTML 이메일 및 PDF 동시 발송"""
@@ -685,6 +689,26 @@ def clean_text(text):
     return text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
 
 def select_top_shorts_topics(data):
+      """실제 소식지 내 수집 데이터로만 파급력 순 Shorts TOP 3 선별"""
+    candidates = []
+    seen_titles = set()
+
+    def add_candidates(items, category, reason_fmt, hook_fmt, script_fmt):
+        for item in items:
+            title = item['title']
+            link = item.get('link', '#')  # 👈 링크 정보 추출
+            if title in seen_titles:
+                continue
+            seen_titles.add(title)
+            candidates.append({
+                'category': category,
+                'title': title,
+                'link': link,  # 👈 'link' 키 항목 추가
+                'reason': reason_fmt,
+                'hook': hook_fmt,
+                'script': script_fmt
+            })
+            
     """
     [stariapj-new-bot 가중치 알고리즘 반영]
     StariaPj 4지역 우선순위 점수(50%) + Google Trends 실시간 지수(50%)를 합산하여

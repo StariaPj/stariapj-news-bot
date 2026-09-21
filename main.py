@@ -688,27 +688,8 @@ def clean_text(text):
         return ""
     return text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
 
-def select_top_shorts_topics(data):
-      """실제 소식지 내 수집 데이터로만 파급력 순 Shorts TOP 3 선별"""
-    candidates = []
-    seen_titles = set()
 
-    def add_candidates(items, category, reason_fmt, hook_fmt, script_fmt):
-        for item in items:
-            title = item['title']
-            link = item.get('link', '#')  # 👈 링크 정보 추출
-            if title in seen_titles:
-                continue
-            seen_titles.add(title)
-            candidates.append({
-                'category': category,
-                'title': title,
-                'link': link,  # 👈 'link' 키 항목 추가
-                'reason': reason_fmt,
-                'hook': hook_fmt,
-                'script': script_fmt
-            })
-            
+def select_top_shorts_topics(data):
     """
     [stariapj-new-bot 가중치 알고리즘 반영]
     StariaPj 4지역 우선순위 점수(50%) + Google Trends 실시간 지수(50%)를 합산하여
@@ -758,6 +739,7 @@ def select_top_shorts_topics(data):
             seen_titles.add(raw_t)
             
             disp_t = item.get('display_title', raw_t)
+            link = item.get('link', '#')  # 👈 원본 기사 링크 추출
             
             # stariapj-new-bot 가중치 계산
             region_score, priority_label = evaluate_stariapj_region_score(raw_t)
@@ -768,6 +750,7 @@ def select_top_shorts_topics(data):
                 'category': category_name,
                 'title': raw_t,
                 'display_title': disp_t,
+                'link': link,  # 👈 'link' 키 추가 완료!
                 'reason': f"{reason_fmt} ({priority_label})",
                 'hook': hook_fmt,
                 'script': script_fmt,
@@ -780,6 +763,8 @@ def select_top_shorts_topics(data):
     # stariapj-new-bot 최종 점수 기준 내림차순 정렬
     candidates.sort(key=lambda x: x['bot_score'], reverse=True)
     return candidates[:3]
+
+
 
 def generate_report_data(service, folder_id):
     """데이터 수집 및 이월 캐시 병합 (한국어 + 남아공 현지 영문 검색 병합)"""

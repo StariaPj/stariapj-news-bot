@@ -369,7 +369,7 @@ def upload_json_to_gdrive(service, folder_id, cache_data, time_str):
 
 
 def generate_html_email_body(data):
-    """제목 클릭 시 별도 창(target='_blank')에서 원본 언론사 소스로 이동하는 HTML 이메일 본문 생성"""
+    """제목 클릭 시 별도 창(target='_blank')에서 원본 언론사 소스로 이동하는 HTML 이메일 본문 생성 (한글 번역 제목 표기)"""
     html_code = f"""
 <!DOCTYPE html>
 <html>
@@ -413,9 +413,12 @@ def generate_html_email_body(data):
     if data.get('shorts_top3'):
         for idx, item in enumerate(data['shorts_top3'], 1):
             link_url = html.escape(item.get('link', '#'))
-            title_txt = html.escape(item['title'])
-            # 👈 쇼츠 제목 클릭 시 원본 기사로 이동하는 <a> 태그 생성
-            title_html = f'<a href="{link_url}" target="_blank" class="item-link" style="color: #2D3748; text-decoration: underline;">{title_txt}</a>' if link_url and link_url != '#' else title_txt
+            disp_title = html.escape(item.get('display_title', item['title'])) # 👈 한글 번역 제목 사용
+            
+            if link_url and link_url != '#':
+                title_html = f'<a href="{link_url}" target="_blank" class="item-link" style="color: #2D3748; text-decoration: underline;">{disp_title}</a>'
+            else:
+                title_html = disp_title
 
             html_code += f"""
             <div class="card">
@@ -450,17 +453,17 @@ def generate_html_email_body(data):
             for idx, item in enumerate(items):
                 color = GRADIENT_COLORS[min(idx, len(GRADIENT_COLORS)-1)]
                 link_url = html.escape(item.get('link', '#'))
-                title_txt = html.escape(item['title'])
+                disp_title = html.escape(item.get('display_title', item['title'])) # 👈 한글 번역 제목 사용
                 
                 if idx == 0:
                     tag_txt = "[🔥TOP]" if is_alert else "[⭐TOP]"
                     tag_color = "#C53030" if is_alert else "#2B6CB0"
                     tag_html = f'<span style="color: {tag_color}; font-weight: bold;">{tag_txt}</span>'
-                    title_html = f'<a href="{link_url}" target="_blank" class="item-link" style="font-weight: bold; color: {color};">{title_txt}</a>'
+                    title_html = f'<a href="{link_url}" target="_blank" class="item-link" style="font-weight: bold; color: {color};">{disp_title}</a>'
                 else:
                     tag_txt = "[속보]" if key == 'breaking' else ("[특가]" if key == 'flights' else "[소식]")
                     tag_html = f'<span style="color: {color};">{tag_txt}</span>'
-                    title_html = f'<a href="{link_url}" target="_blank" class="item-link" style="color: {color};">{title_txt}</a>'
+                    title_html = f'<a href="{link_url}" target="_blank" class="item-link" style="color: {color};">{disp_title}</a>'
                     
                 html_code += f"""
                 <tr class="item-row">
@@ -477,11 +480,15 @@ def generate_html_email_body(data):
         html_code += '<table class="item-table">'
         for idx, vid in enumerate(data['yt_videos']):
             color = GRADIENT_COLORS[min(idx, len(GRADIENT_COLORS)-1)]
-            v_title = html.escape(vid['snippet']['title'])
+            v_title_raw = vid['snippet']['title']
+            v_title_ko = translate_to_korean(v_title_raw)
+            v_tag = detect_country_tag(v_title_raw, v_title_ko)
+            v_disp = format_display_title(v_tag, v_title_ko) # 👈 한글 번역 및 태그 적용
+            
             v_id = vid.get('id', {}).get('videoId', '')
             v_url = f"https://www.youtube.com/watch?v={v_id}" if v_id else "#"
             
-            title_html = f'<a href="{v_url}" target="_blank" class="item-link" style="color: {color};">{v_title}</a>'
+            title_html = f'<a href="{v_url}" target="_blank" class="item-link" style="color: {color};">{html.escape(v_disp)}</a>'
             
             html_code += f"""
             <tr class="item-row">

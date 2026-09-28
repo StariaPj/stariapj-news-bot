@@ -1038,9 +1038,13 @@ def create_pdf_bytes(data):
 
 def upload_to_gdrive(service, folder_id, pdf_bytes, time_str):
     """구글 드라이브 PDF 파일 업로드"""
+    if not folder_id:
+        print("⚠️ 환경변수 GDRIVE_FOLDER_ID가 비어있거나 설정되지 않았습니다.")
+    if not service:
+        print("⚠️ 구글 드라이브 서비스 생성 실패.")
     if not service or not folder_id:
-        print("❌ 구글 드라이브 설정이 누락되었습니다.")
-        sys.exit(1)
+        print("⚠️ 구글 드라이브 미설정으로 인해 드라이브 업로드를 스킵하고 이메일 발송으로 진행합니다.")
+        return
         
     try:
         filename = f"StariaPj_Daily_Report_{time_str}_KST.pdf"
@@ -1060,8 +1064,7 @@ def upload_to_gdrive(service, folder_id, pdf_bytes, time_str):
 
         print(f"✅ Google Drive PDF 업로드 성공! (파일명: {filename}, ID: {file.get('id')})")
     except Exception as e:
-        print(f"❌ Google Drive 업로드 실패: {e}")
-        sys.exit(1)
+        print(f"⚠️ Google Drive 업로드 실패 (스킵 후 이메일 발송 진행): {e}")
 
 if __name__ == "__main__":
     folder_id = os.environ.get("GDRIVE_FOLDER_ID", "").strip().rstrip('/')

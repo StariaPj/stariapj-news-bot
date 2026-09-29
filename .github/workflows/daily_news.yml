@@ -45,7 +45,7 @@ jobs:
       run: |
         python main.py
 
-    - name: Expire old public headlines
+    - name: Expire old PDF newsletters
       if: always()
       run: python publish_news.py
 
@@ -54,7 +54,7 @@ jobs:
       run: |
         git config user.name "stariapj-news-bot"
         git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-        git add public/news.json
+        git add -A public/
         if ! git diff --cached --quiet; then
           git commit -m "Refresh public tourism headlines"
           git push

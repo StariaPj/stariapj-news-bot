@@ -1,1 +1,5 @@
-{"updated_at":null,"retention_hours":72,"newsletters":[]}
+{
+  "updated_at": null,
+  "retention_hours": 48,
+  "newsletters": []
+}

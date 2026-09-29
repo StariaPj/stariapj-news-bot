@@ -53,7 +53,7 @@ def create_customer_pdf(data, language, translator=translate_headline):
         if not font_path.exists():
             response = requests.get("https://raw.githubusercontent.com/google/fonts/main/ofl/nanumgothic/NanumGothic-Regular.ttf",timeout=30)
             response.raise_for_status()
-            if response.content[:4] != b"\\x00\\x01\\x00\\x00":
+            if response.content[:4] != bytes([0,1,0,0]):
                 raise ValueError("Invalid Korean font")
             font_path.write_bytes(response.content)
         font = "StariaPjKorean"

@@ -1077,7 +1077,13 @@ if __name__ == "__main__":
     report_data = generate_report_data(service, folder_id)
     from publish_news import export_news
     pdf_bytes = create_pdf_bytes(report_data)
-    export_news(report_data, pdf_bytes)
+    try:
+        from customer_newsletter import create_customer_pdf
+        customer_pdfs = {lang: create_customer_pdf(report_data, lang) for lang in ("en", "ko")}
+        export_news(report_data, customer_pdfs)
+    except Exception as exc:
+        print(f"Customer PDF publication failed: {type(exc).__name__}")
+
 
     upload_to_gdrive(service, folder_id, pdf_bytes, report_data['time_str'])
     upload_json_to_gdrive(service, folder_id, report_data['new_cache'], report_data['time_str'])

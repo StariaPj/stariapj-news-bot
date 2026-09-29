@@ -24,10 +24,20 @@ def translate_headline(text, language):
     text = re.sub(r"^\s*\[(?:ZA|KR|NO)\]\s*", "", text).strip()
     if language == "ko" and re.search(r"[가-힣]", text):
         return text
-    response = requests.get("https://translate.googleapis.com/translate_a/single",
-        params={"client":"gtx","sl":"auto","tl":language,"dt":"t","q":text},timeout=12)
-    response.raise_for_status()
-    result = "".join(x[0] for x in response.json()[0] if x[0]).strip()
+    if language == "en" and not re.search(r"[가-힣]", text):
+        return text
+    result = ""
+    try:
+        response = requests.get("https://translate.googleapis.com/translate_a/single",
+            params={"client":"gtx","sl":"auto","tl":language,"dt":"t","q":text},timeout=12)
+        response.raise_for_status()
+        result = "".join(x[0] for x in response.json()[0] if x[0]).strip()
+    except (requests.RequestException, ValueError, KeyError, TypeError):
+        pair = "ko|en" if language == "en" else "en|ko"
+        response = requests.get("https://api.mymemory.translated.net/get",
+            params={"q":text,"langpair":pair},timeout=12)
+        response.raise_for_status()
+        result = response.json().get("responseData",{}).get("translatedText","").strip()
     if not result or (language=="en" and re.search(r"[가-힣]",result)):
         raise ValueError("Headline translation did not produce the requested language")
     if language=="ko" and not re.search(r"[가-힣]",result):

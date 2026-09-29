@@ -6,7 +6,10 @@ import requests
 from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
 from reportlab.pdfbase import pdfmetrics
-from reportlab.pdfbase.cidfonts import UnicodeCIDFont
+from reportlab.pdfbase.ttfonts import TTFont
+from pathlib import Path
+import tempfile
+import reportlab
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, HRFlowable
 from reportlab.lib.styles import ParagraphStyle
 
@@ -45,8 +48,19 @@ def translate_headline(text, language):
     return result
 
 def create_customer_pdf(data, language, translator=translate_headline):
-    pdfmetrics.registerFont(UnicodeCIDFont("HYGothic-Medium"))
-    font = "HYGothic-Medium" if language=="ko" else "Helvetica"
+    if language == "ko":
+        font_path = Path(tempfile.gettempdir())/"StariaPj-NanumGothic-Regular.ttf"
+        if not font_path.exists():
+            response = requests.get("https://raw.githubusercontent.com/google/fonts/main/ofl/nanumgothic/NanumGothic-Regular.ttf",timeout=30)
+            response.raise_for_status()
+            if response.content[:4] != b"\\x00\\x01\\x00\\x00":
+                raise ValueError("Invalid Korean font")
+            font_path.write_bytes(response.content)
+        font = "StariaPjKorean"
+    else:
+        font_path = Path(reportlab.__file__).parent/"fonts"/"Vera.ttf"
+        font = "StariaPjEnglish"
+    pdfmetrics.registerFont(TTFont(font,str(font_path)))
     title = "StariaPj 관광 소식지" if language=="ko" else "StariaPj Travel Newsletter"
     buffer=io.BytesIO()
     doc=SimpleDocTemplate(buffer,pagesize=A4,leftMargin=38,rightMargin=38,topMargin=38,bottomMargin=38)

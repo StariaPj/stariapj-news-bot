@@ -1076,8 +1076,8 @@ if __name__ == "__main__":
     service = get_gdrive_service()
     report_data = generate_report_data(service, folder_id)
     from publish_news import export_news
-    export_news(report_data)
     pdf_bytes = create_pdf_bytes(report_data)
+    export_news(report_data, pdf_bytes)
 
     upload_to_gdrive(service, folder_id, pdf_bytes, report_data['time_str'])
     upload_json_to_gdrive(service, folder_id, report_data['new_cache'], report_data['time_str'])

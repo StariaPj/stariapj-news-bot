@@ -8,6 +8,13 @@ on:
     - cron: '5 17 * * *'
   workflow_dispatch: # 언제든 수동 실행 가능
 
+permissions:
+  contents: write
+
+concurrency:
+  group: daily-news-publication
+  cancel-in-progress: false
+
 jobs:
   run-automation:
     runs-on: ubuntu-latest
@@ -37,3 +44,18 @@ jobs:
           EMAIL_PASS: ${{ secrets.EMAIL_PASS }}
       run: |
         python main.py
+
+    - name: Expire old public headlines
+      if: always()
+      run: python publish_news.py
+
+    - name: Publish tourism feed
+      if: always()
+      run: |
+        git config user.name "stariapj-news-bot"
+        git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+        git add public/news.json
+        if ! git diff --cached --quiet; then
+          git commit -m "Refresh public tourism headlines"
+          git push
+        fi

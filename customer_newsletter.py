@@ -47,6 +47,22 @@ def translate_headline(text, language):
         raise ValueError("Korean headline translation unavailable")
     return result
 
+
+def headline_country_tag(item):
+    tag = str(item.get("country_tag", "")).upper()
+    if tag in ("KR", "ZA", "NO"):
+        return tag
+    raw = item.get("display_title", "") + " " + item.get("title", "")
+    match = re.match(r"^\\s*\\[?(KR|ZA|NO)\\]", raw)
+    if match:
+        return match.group(1)
+    raw = (raw + " " + item.get("snippet", {}).get("title", "")).lower()
+    if re.search(r"대한민국|한국|서울|부산|제주|\\bsouth korea\\b|\\brepublic of korea\\b|\\bseoul\\b|\\bbusan\\b|\\bjeju\\b", raw):
+        return "KR"
+    if re.search(r"남아공|남아프리카|케이프타운|요하네스버그|\\bsouth africa\\b|\\bcape town\\b|\\bjohannesburg\\b|\\bwestern cape\\b|\\bnorthern cape\\b", raw):
+        return "ZA"
+    return "NO"
+
 def create_customer_pdf(data, language, translator=translate_headline):
     if language == "ko":
         font_path = Path(tempfile.gettempdir())/"StariaPj-NanumGothic-Regular.ttf"
@@ -82,13 +98,13 @@ def create_customer_pdf(data, language, translator=translate_headline):
             url=item.get("link","")
             escaped=html.escape(text)
             linked=f'<a href="{html.escape(url,quote=True)}">{escaped}</a>' if url.startswith(("https://","http://")) else escaped
-            story.append(Paragraph(f"{index}. {linked}",body))
+            story.append(Paragraph(f"{headline_country_tag(item)}] {index}. {linked}",body))
     if data.get("yt_videos"):
         story.append(Paragraph("여행 관련 영상" if language=="ko" else "Travel videos",section))
         for item in data["yt_videos"]:
             text=translator(item["snippet"]["title"],language)
             vid=item.get("id",{}).get("videoId","")
             url="https://www.youtube.com/watch?v="+vid
-            story.append(Paragraph(f'<a href="{html.escape(url,quote=True)}">{html.escape(text)}</a>',body))
+            story.append(Paragraph(f'{headline_country_tag(item)}] <a href="{html.escape(url,quote=True)}">{html.escape(text)}</a>',body))
     doc.build(story)
     return buffer.getvalue()

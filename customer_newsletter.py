@@ -53,13 +53,13 @@ def headline_country_tag(item):
     if tag in ("KR", "ZA", "NO"):
         return tag
     raw = item.get("display_title", "") + " " + item.get("title", "")
-    match = re.match(r"^\\s*\\[?(KR|ZA|NO)\\]", raw)
+    match = re.match(r"^\s*\[?(KR|ZA|NO)\]", raw)
     if match:
         return match.group(1)
     raw = (raw + " " + item.get("snippet", {}).get("title", "")).lower()
-    if re.search(r"대한민국|한국|서울|부산|제주|\\bsouth korea\\b|\\brepublic of korea\\b|\\bseoul\\b|\\bbusan\\b|\\bjeju\\b", raw):
+    if re.search(r"대한민국|한국|서울|부산|제주|\bsouth korea\b|\brepublic of korea\b|\bseoul\b|\bbusan\b|\bjeju\b", raw):
         return "KR"
-    if re.search(r"남아공|남아프리카|케이프타운|요하네스버그|\\bsouth africa\\b|\\bcape town\\b|\\bjohannesburg\\b|\\bwestern cape\\b|\\bnorthern cape\\b", raw):
+    if re.search(r"남아공|남아프리카|케이프타운|요하네스버그|\bsouth africa\b|\bcape town\b|\bjohannesburg\b|\bwestern cape\b|\bnorthern cape\b", raw):
         return "ZA"
     return "NO"
 

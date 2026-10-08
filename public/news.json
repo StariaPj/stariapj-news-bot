@@ -1,7 +1,18 @@
 {
-  "updated_at": 1791436491.647162,
+  "updated_at": 1791480313.262743,
   "retention_hours": 48,
   "newsletters": [
+    {
+      "id": "2026-10-09_0220",
+      "title_en": "StariaPj Travel Newsletter",
+      "title_ko": "StariaPj 관광 소식지",
+      "published_at": 1791480011.0,
+      "received_at": 1791480309.132936,
+      "files": {
+        "en": "StariaPj_Daily_Report_2026-10-09_0220_KST_en.pdf",
+        "ko": "StariaPj_Daily_Report_2026-10-09_0220_KST_ko.pdf"
+      }
+    },
     {
       "id": "2026-10-08_1413",
       "title_en": "StariaPj Travel Newsletter",
@@ -33,28 +44,6 @@
       "files": {
         "en": "StariaPj_Daily_Report_2026-10-07_1412_KST_en.pdf",
         "ko": "StariaPj_Daily_Report_2026-10-07_1412_KST_ko.pdf"
-      }
-    },
-    {
-      "id": "2026-10-07_0218",
-      "title_en": "StariaPj Travel Newsletter",
-      "title_ko": "StariaPj 관광 소식지",
-      "published_at": 1791307121.0,
-      "received_at": 1791307429.349525,
-      "files": {
-        "en": "StariaPj_Daily_Report_2026-10-07_0218_KST_en.pdf",
-        "ko": "StariaPj_Daily_Report_2026-10-07_0218_KST_ko.pdf"
-      }
-    },
-    {
-      "id": "2026-10-06_1412",
-      "title_en": "StariaPj Travel Newsletter",
-      "title_ko": "StariaPj 관광 소식지",
-      "published_at": 1791263522.0,
-      "received_at": 1791263804.383996,
-      "files": {
-        "en": "StariaPj_Daily_Report_2026-10-06_1412_KST_en.pdf",
-        "ko": "StariaPj_Daily_Report_2026-10-06_1412_KST_ko.pdf"
       }
     }
   ]

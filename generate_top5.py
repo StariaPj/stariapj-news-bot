@@ -154,9 +154,26 @@ def fetch_candidates():
             item = {'title': title, 'description': description,
                     'source': source, 'source_url': link, 'published_at': stamp}
             item['score'] = score(item)
-            item['region'] = group
+            item['region'] = infer_region(dict(item, region=group))
             items.append(item)
     return sorted(items, key=lambda x: (x['score'], x['published_at']), reverse=True)
+
+
+def infer_region(item):
+    """Use explicit story geography; fall back to source search group."""
+    title = str(item.get('title') or item.get('title_ko') or '').lower()
+    source = str(item.get('source') or '').lower()
+    content = title + ' ' + source
+    za_terms = ('south africa', 'south african', 'cape town', 'johannesburg',
+                'pretoria', 'durban', '남아공', '남아프리카', '케이프타운', '요하네스버그')
+    kr_terms = ('south korea', 'korean', 'korea', 'seoul', 'jeju', 'busan',
+                '한국', '대한민국', '서울', '제주', '부산', '방한',
+                '파이낸셜뉴스', '아시아경제', '스타뉴스', '헤럴드경제')
+    if any(term in content for term in za_terms):
+        return 'ZA'
+    if any(term in content for term in kr_terms):
+        return 'KR'
+    return item.get('region') if item.get('region') in ('ZA', 'KR', 'INT') else 'INT'
 
 
 def load_previous():
@@ -164,7 +181,7 @@ def load_previous():
         return []
     try:
         data = json.loads(OUTPUT.read_text(encoding='utf-8'))
-        return [x for x in data.get('top5', []) if is_recent(x.get('published_at'))]
+        return [dict(x, region=infer_region(x)) for x in data.get('top5', []) if is_recent(x.get('published_at'))]
     except (OSError, ValueError, TypeError, AttributeError):
         return []
 
@@ -200,7 +217,7 @@ def main():
             'source': item['source'],
             'source_url': item['source_url'],
             'published_at': item['published_at'],
-            'region': item.get('region', 'INT'),
+            'region': infer_region(item),
         })
         used.add(item['source_url'])
     for item in previous:
@@ -208,7 +225,7 @@ def main():
             break
         link = item.get('source_url', '')
         if link not in used and item.get('title_ko') and item.get('summary_ko'):
-            results.append(item)
+            results.append(dict(item, region=infer_region(item)))
             used.add(link)
     results.sort(key=lambda x: x['published_at'], reverse=True)
     OUTPUT.parent.mkdir(parents=True, exist_ok=True)

@@ -117,7 +117,7 @@ def description_from(entry):
     # Strip title prefix, if repeated.
     if raw.casefold().startswith(title.casefold()):
         raw = raw[len(title):].lstrip(' -:|')
-    if len(raw) < 35:
+    if len(raw) < 12:
         return ''
     return raw[:750]
 
@@ -146,7 +146,9 @@ def fetch_candidates():
                 continue
             description = description_from(entry)
             if not description:
-                continue
+                # Google News RSS often repeats the headline rather than providing an article abstract.
+                # Keep the article eligible; do not fabricate a detailed summary.
+                description = title
             key = re.sub(r'\W+', '', title.casefold())[:110]
             if key in seen:
                 continue
@@ -207,8 +209,10 @@ def main():
                 continue
             title_ko = translate_ko(item['title'])
             summary_ko = translate_ko(item['description'])
-            if not title_ko or not summary_ko or len(summary_ko) < 20:
-                continue
+            if not title_ko:
+                title_ko = item['title']
+            if not summary_ko or summary_ko.strip() == title_ko.strip():
+                summary_ko = '자세한 내용은 제목을 클릭해 원문에서 확인하세요.'
             results.append({
                 'title_ko': title_ko,
                 'summary_ko': summary_ko,
@@ -227,11 +231,34 @@ def main():
                     and item.get('title_ko') and item.get('summary_ko')):
                 results.append(dict(item, region=region))
                 used.add(link)
-    # Do not silently replace a missing ZA or INT article with a KR story.
-    for region, count in quotas.items():
-        actual = sum(x['region'] == region for x in results)
-        if actual < count:
-            print('TOP 5 shortage:', region, 'expected', count, 'found', actual)
+    # Preferred 2:2:1 mix, but always fill five slots from any region.
+    # This is a fallback, not a replacement for regional sourcing.
+    for item in candidates:
+        if len(results) >= LIMIT:
+            break
+        link = item['source_url']
+        if link in used:
+            continue
+        title_ko = translate_ko(item['title']) or item['title']
+        summary_ko = translate_ko(item['description'])
+        if not summary_ko or summary_ko.strip() == title_ko.strip():
+            summary_ko = '자세한 내용은 제목을 클릭해 원문에서 확인하세요.'
+        results.append({
+            'title_ko': title_ko, 'summary_ko': summary_ko,
+            'source': item['source'], 'source_url': link,
+            'published_at': item['published_at'], 'region': item['region'],
+        })
+        used.add(link)
+    for item in previous:
+        if len(results) >= LIMIT:
+            break
+        link = item.get('source_url', '')
+        if link not in used and item.get('title_ko'):
+            results.append(dict(item, region=infer_region(item)))
+            used.add(link)
+    counts = {region: sum(x['region'] == region for x in results)
+              for region in quotas}
+    print('TOP 5 regional distribution:', counts)
     results.sort(key=lambda x: x['published_at'], reverse=True)
     OUTPUT.parent.mkdir(parents=True, exist_ok=True)
     OUTPUT.write_text(json.dumps({

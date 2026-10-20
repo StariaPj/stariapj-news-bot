@@ -159,26 +159,43 @@ def fetch_candidates():
             item = {'title': title, 'description': description,
                     'source': source, 'source_url': link, 'published_at': stamp}
             item['score'] = score(item)
-            item['region'] = infer_region(dict(item, region=group))
+            item['region'] = infer_region(item)
+            if not relevant_story(item):
+                continue
             items.append(item)
     return sorted(items, key=lambda x: (x['score'], x['published_at']), reverse=True)
 
 
 def infer_region(item):
-    """Use explicit story geography; fall back to source search group."""
+    """Classify by the article itself, never by the search query."""
     title = str(item.get('title') or item.get('title_ko') or '').lower()
-    source = str(item.get('source') or '').lower()
-    content = title + ' ' + source
+    description = str(item.get('description') or '').lower()
+    content = title + ' ' + description
     za_terms = ('south africa', 'south african', 'cape town', 'johannesburg',
-                'pretoria', 'durban', '남아공', '남아프리카', '케이프타운', '요하네스버그')
-    kr_terms = ('south korea', 'korean', 'korea', 'seoul', 'jeju', 'busan',
-                '한국', '대한민국', '서울', '제주', '부산', '방한',
-                '파이낸셜뉴스', '아시아경제', '스타뉴스', '헤럴드경제')
+                'pretoria', 'durban', 'western cape', 'eastern cape',
+                'kruger', 'satsa', 'sanparks', '남아공', '남아프리카',
+                '케이프타운', '요하네스버그')
+    kr_terms = ('south korea', 'south korean', 'republic of korea',
+                'korean tourism', 'korea tourism', 'korean air',
+                'seoul', 'jeju', 'busan', '한국', '대한민국',
+                '서울', '제주', '부산', '방한')
     if any(term in content for term in za_terms):
         return 'ZA'
     if any(term in content for term in kr_terms):
         return 'KR'
-    return item.get('region') if item.get('region') in ('ZA', 'KR', 'INT') else 'INT'
+    return 'INT'
+
+
+def relevant_story(item):
+    text = (str(item.get('title') or item.get('title_ko') or '') + ' ' +
+            str(item.get('description') or '')).lower()
+    # Avoid sports event advisories and incidental travel references.
+    if any(x in text for x in ('steelers', 'saints game', 'nfl game',
+                                'football match', 'nba game')):
+        return False
+    return any(x in text for x in ('touris', 'travel', 'flight', 'airline',
+                                    'airport', 'visa', 'visitor', 'hotel',
+                                    'national park', '여행', '관광', '항공', '비자'))
 
 
 def load_previous():
@@ -186,7 +203,7 @@ def load_previous():
         return []
     try:
         data = json.loads(OUTPUT.read_text(encoding='utf-8'))
-        return [dict(x, region=infer_region(x)) for x in data.get('top5', []) if is_recent(x.get('published_at'))]
+        return [dict(x, region=infer_region(x)) for x in data.get('top5', []) if is_recent(x.get('published_at')) and relevant_story(x)]
     except (OSError, ValueError, TypeError, AttributeError):
         return []
 

@@ -1,4 +1,89 @@
 
+import calendar
+import html
+import json
+import re
+from datetime import datetime, timezone
+from pathlib import Path
+from urllib.parse import quote, urlparse
+
+import feedparser
+import requests
+
+OUTPUT = Path("public/top5.json")
+DAYS = 5
+LIMIT = 5
+
+SEARCHES = [
+    "South Africa tourism travel safety",
+    "South Africa tourism airlines",
+    "South Korea tourism travel",
+    "Africa Asia tourism flights",
+    "international tourism travel advisory",
+]
+
+KEYWORDS = {
+    "travel advisory": 30,
+    "travel warning": 30,
+    "safety": 25,
+    "tourism": 10,
+    "airline": 15,
+    "flight": 15,
+    "visa": 25,
+    "airport": 15,
+    "south africa": 20,
+    "korea": 20,
+    "africa": 10,
+    "asia": 10,
+}
+
+SESSION = requests.Session()
+SESSION.headers.update({
+    "User-Agent": "Mozilla/5.0 StariaPjTravelNews/1.0"
+})
+
+def clean(value):
+    value = re.sub(r"<[^>]+>", " ", str(value or ""))
+    value = html.unescape(value)
+    return re.sub(r"\s+", " ", value).strip()
+
+def translate_ko(text):
+    if not text:
+        return ""
+
+    if re.search(r"[가-힣]", text):
+        return text
+
+    try:
+        response = SESSION.get(
+            "https://translate.googleapis.com/translate_a/single",
+            params={
+                "client": "gtx",
+                "sl": "auto",
+                "tl": "ko",
+                "dt": "t",
+                "q": text[:1800],
+            },
+            timeout=15,
+        )
+        response.raise_for_status()
+
+        translated = "".join(
+            part[0]
+            for part in response.json()[0]
+            if part[0]
+        ).strip()
+
+        return translated if re.search(r"[가-힣]", translated) else ""
+
+    except (requests.RequestException, ValueError,
+            KeyError, IndexError, TypeError):
+        return ""
+
+
+
+
+
 
 def published_seconds(entry):
     parsed = entry.get('published_parsed') or entry.get('updated_parsed')

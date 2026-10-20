@@ -37,6 +37,7 @@ jobs:
           assert len(items) == 6, f'Expected 6 news items, got {len(items)}'
           assert all(x.get('region') in ('ZA', 'KR') for x in items)
           assert len({x['source_url'] for x in items}) == 6
+          assert all(any('가' <= c <= '힣' for c in x['title_ko']) for x in items), 'Non-Korean headline detected'
           PY
       - name: Publish TOP 6 JSON only
         run: |

@@ -92,8 +92,17 @@ def translate_ko(text):
 
 
 def title_based_summary(title_ko):
-    # State only what the headline supports; never imply article-body access.
-    title = re.sub(r'\\s+[-–]\\s+[^-–]{2,65}
+    # Only summarize facts actually present in the headline.
+    title = re.sub(r'\s+[-–]\s+[^-–]{2,65}$', '', title_ko).strip()
+    return '제목 기준: ' + title.rstrip('.。') + '.'
+
+
+def korean_title(text):
+    translated = translate_ko(text)
+    return translated if translated and re.search(r'[가-힣]', translated) else ''
+
+
+def published_seconds(entry):
     parsed = entry.get('published_parsed') or entry.get('updated_parsed')
     return float(calendar.timegm(parsed)) if parsed else None
 

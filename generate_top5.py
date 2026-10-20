@@ -23,6 +23,10 @@ SEARCHES = [
     "South Korea tourism travel",
     "Seoul Jeju tourism travel news",
     "Korea tourism travel safety flights",
+    "South Africa travel tourism visa flights",
+    "남아공 관광 여행 항공 안전",
+    "한국 관광 여행 항공 비자",
+    "제주 서울 관광 여행",
 ]
 
 KEYWORDS = {
@@ -187,7 +191,8 @@ def infer_region(item):
     kr_terms = ('south korea', 'south korean', 'republic of korea',
                 'korean tourism', 'korea tourism',
                 'seoul', 'jeju', 'busan', '한국', '대한민국',
-                '서울', '제주', '부산', '방한')
+                '서울', '제주', '부산', '방한', '한국관광공사',
+                '인천공항', '인천국제공항', '제주공항', '남해', '경주')
     # Regional stories must be about the destination, not merely name an airline.
     if any(term in title for term in za_terms):
         return 'ZA'
@@ -205,7 +210,8 @@ def relevant_story(item):
         return False
     return any(x in text for x in ('touris', 'travel', 'flight', 'airline',
                                     'airport', 'visa', 'visitor', 'hotel',
-                                    'national park', '여행', '관광', '항공', '비자'))
+                                    'national park', '여행', '관광', '항공', '비자',
+                                    '공항', '입국', '출국', '국립공원', '여객'))
 
 
 def load_previous():
@@ -213,7 +219,7 @@ def load_previous():
         return []
     try:
         data = json.loads(OUTPUT.read_text(encoding='utf-8'))
-        return [dict(x, region=infer_region(x)) for x in data.get('top5', []) if is_recent(x.get('published_at')) and relevant_story(x) and re.search(r'[가-힣]', x.get('title_ko', ''))]
+        return [dict(x, region=x['region']) for x in data.get('top5', []) if is_recent(x.get('published_at')) and x.get('region') in ('ZA', 'KR') and x.get('title_ko') and x.get('summary_ko')]
     except (OSError, ValueError, TypeError, AttributeError):
         return []
 
@@ -221,6 +227,7 @@ def load_previous():
 def main():
     candidates = fetch_candidates()
     print('Candidates with descriptions:', len(candidates))
+    print('Candidate regions:', {r: sum(x['region'] == r for x in candidates) for r in ('ZA','KR','INT')})
     previous = load_previous()
     results = []
     used = set()
@@ -259,8 +266,7 @@ def main():
                     and item.get('title_ko') and item.get('summary_ko')):
                 results.append(dict(item, region=region))
                 used.add(link)
-    # Preferred 2:2:1 mix, but always fill five slots from any region.
-    # This is a fallback, not a replacement for regional sourcing.
+    # Fill remaining slots from either ZA or KR only.
     for item in candidates:
         if len(results) >= LIMIT:
             break
@@ -289,7 +295,7 @@ def main():
             used.add(link)
     counts = {region: sum(x['region'] == region for x in results)
               for region in quotas}
-    print('TOP 5 regional distribution:', counts)
+    print('TOP 6 regional distribution:', counts)
     results = [x for x in results if x['region'] in quotas]
     results.sort(key=lambda x: x['published_at'], reverse=True)
     OUTPUT.parent.mkdir(parents=True, exist_ok=True)
@@ -297,7 +303,7 @@ def main():
         'updated_at': datetime.now(timezone.utc).timestamp(),
         'top5': results[:LIMIT],
     }, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
-    print('TOP 5 generated:', len(results[:LIMIT]))
+    print('TOP 6 generated:', len(results[:LIMIT]))
 
 
 if __name__ == '__main__':

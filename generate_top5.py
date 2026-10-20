@@ -53,7 +53,10 @@ def translate_ko(text):
     if not text:
         return ""
 
-    if re.search(r"[가-힣]", text):
+    # Mixed English headlines with a Korean publisher suffix still need translation.
+    letters = re.findall(r"[A-Za-z]", text)
+    korean = re.findall(r"[가-힣]", text)
+    if korean and len(korean) >= len(letters):
         return text
 
     try:
@@ -192,41 +195,43 @@ def main():
     previous = load_previous()
     results = []
     used = set()
-    # Target: two South African, two Korean, one international story.
     quotas = {"ZA": 2, "KR": 2, "INT": 1}
-    selected = []
+    # Translate candidates inside each regional pool, not after selecting only
+    # a few. A translation failure must not eliminate an entire region.
     for region, count in quotas.items():
-        pool = [x for x in candidates if x.get("region") == region]
-        selected.extend(pool[:count])
-    # Fill gaps from all recent candidates when a region lacks enough stories.
-    for item in candidates:
-        if len(selected) >= LIMIT:
-            break
-        if item not in selected:
-            selected.append(item)
-    for item in selected:
-        if len(results) >= LIMIT:
-            break
-        title_ko = translate_ko(item['title'])
-        summary_ko = translate_ko(item['description'])
-        if not title_ko or not summary_ko or len(summary_ko) < 20:
-            continue
-        results.append({
-            'title_ko': title_ko,
-            'summary_ko': summary_ko,
-            'source': item['source'],
-            'source_url': item['source_url'],
-            'published_at': item['published_at'],
-            'region': infer_region(item),
-        })
-        used.add(item['source_url'])
-    for item in previous:
-        if len(results) >= LIMIT:
-            break
-        link = item.get('source_url', '')
-        if link not in used and item.get('title_ko') and item.get('summary_ko'):
-            results.append(dict(item, region=infer_region(item)))
-            used.add(link)
+        pool = [x for x in candidates if x.get('region') == region]
+        for item in pool:
+            if sum(x['region'] == region for x in results) >= count:
+                break
+            if item['source_url'] in used:
+                continue
+            title_ko = translate_ko(item['title'])
+            summary_ko = translate_ko(item['description'])
+            if not title_ko or not summary_ko or len(summary_ko) < 20:
+                continue
+            results.append({
+                'title_ko': title_ko,
+                'summary_ko': summary_ko,
+                'source': item['source'],
+                'source_url': item['source_url'],
+                'published_at': item['published_at'],
+                'region': region,
+            })
+            used.add(item['source_url'])
+        # Previously published stories can fill only their own region.
+        for item in previous:
+            if sum(x['region'] == region for x in results) >= count:
+                break
+            link = item.get('source_url', '')
+            if (item.get('region') == region and link not in used
+                    and item.get('title_ko') and item.get('summary_ko')):
+                results.append(dict(item, region=region))
+                used.add(link)
+    # Do not silently replace a missing ZA or INT article with a KR story.
+    for region, count in quotas.items():
+        actual = sum(x['region'] == region for x in results)
+        if actual < count:
+            print('TOP 5 shortage:', region, 'expected', count, 'found', actual)
     results.sort(key=lambda x: x['published_at'], reverse=True)
     OUTPUT.parent.mkdir(parents=True, exist_ok=True)
     OUTPUT.write_text(json.dumps({

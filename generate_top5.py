@@ -17,7 +17,9 @@ LIMIT = 5
 SEARCHES = [
     "South Africa tourism travel safety",
     "South Africa tourism airlines",
+    "South Africa tourism department SATSA travel",
     "South Korea tourism travel",
+    "Korea tourism travel safety flights",
     "Africa Asia tourism flights",
     "international tourism travel advisory",
 ]
@@ -121,6 +123,8 @@ def fetch_candidates():
     items = []
     seen = set()
     for search in SEARCHES:
+        group = ("ZA" if "South Africa" in search else
+                 "KR" if "Korea" in search else "INT")
         url = ('https://news.google.com/rss/search?q='
                + quote(search + ' when:5d') + '&hl=en&gl=US&ceid=US:en')
         try:
@@ -150,6 +154,7 @@ def fetch_candidates():
             item = {'title': title, 'description': description,
                     'source': source, 'source_url': link, 'published_at': stamp}
             item['score'] = score(item)
+            item['region'] = group
             items.append(item)
     return sorted(items, key=lambda x: (x['score'], x['published_at']), reverse=True)
 
@@ -170,12 +175,23 @@ def main():
     previous = load_previous()
     results = []
     used = set()
+    # Target: two South African, two Korean, one international story.
+    quotas = {"ZA": 2, "KR": 2, "INT": 1}
+    selected = []
+    for region, count in quotas.items():
+        pool = [x for x in candidates if x.get("region") == region]
+        selected.extend(pool[:count])
+    # Fill gaps from all recent candidates when a region lacks enough stories.
     for item in candidates:
+        if len(selected) >= LIMIT:
+            break
+        if item not in selected:
+            selected.append(item)
+    for item in selected:
         if len(results) >= LIMIT:
             break
         title_ko = translate_ko(item['title'])
         summary_ko = translate_ko(item['description'])
-        # Avoid inventing 2-3 sentences when the feed provides only one.
         if not title_ko or not summary_ko or len(summary_ko) < 20:
             continue
         results.append({
@@ -184,9 +200,9 @@ def main():
             'source': item['source'],
             'source_url': item['source_url'],
             'published_at': item['published_at'],
+            'region': item.get('region', 'INT'),
         })
         used.add(item['source_url'])
-    # Keep recent prior items if RSS or translation temporarily fails.
     for item in previous:
         if len(results) >= LIMIT:
             break

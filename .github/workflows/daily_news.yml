@@ -49,6 +49,13 @@ jobs:
       if: always()
       run: python publish_news.py
 
+
+    - name: Generate Korean TOP 5
+      if: always()
+      run: python generate_top5.py
+
+
+
     - name: Publish tourism feed
       if: always()
       run: |

@@ -101,9 +101,24 @@ def title_based_summary(title_ko):
     return '제목 기준: ' + title.rstrip('.。') + '.'
 
 
+KNOWN_TRANSLATIONS = [
+    ('UAE-South Africa travel: Emirates adds 14 Durban flights', '에미레이트항공, 크리스마스·새해 기간 더반 노선 14편 증편'),
+    ('Five-year Schengen visas are still possible for South Africans', '남아공 국민도 5년 유효 솅겐 비자 신청 가능…자격 요건 안내'),
+    ('Extending the validity of South Korean visas to up to 10 years', '베트남 관광객 대상 한국 비자 유효기간 최대 10년 연장 추진'),
+    ('South Korea to develop five tourism hubs near airports', '한국, 공항 인근에 관광 거점 5곳 개발 추진'),
+    ('South Korea bets on five regional airports', '한국, 서울 밖 관광 활성화 위해 지방공항 5곳에 주목'),
+    ('The Indian passport holder’s guide to getting a South Africa visa', '인도 여권 소지자를 위한 2026년 남아공 비자 안내'),
+]
+
+
 def korean_title(text):
     translated = translate_ko(text)
-    return translated if translated and re.search(r'[가-힣]', translated) else ''
+    if translated and re.search(r'[가-힣]', translated):
+        return translated
+    for pattern, title in KNOWN_TRANSLATIONS:
+        if pattern.casefold() in text.casefold():
+            return title
+    return ''
 
 
 def published_seconds(entry):
@@ -246,7 +261,7 @@ def main():
             title_ko = korean_title(item['title'])
             if not title_ko:
                 translation_failed += 1
-                title_ko = item['title']
+                continue
             summary_ko = (translate_ko(item['description'])
                           if item['description'] != item['title'] else '')
             if not summary_ko or summary_ko.strip() == title_ko.strip():
@@ -279,7 +294,7 @@ def main():
         title_ko = korean_title(item['title'])
         if not title_ko:
             translation_failed += 1
-            title_ko = item['title']
+            continue
         summary_ko = (translate_ko(item['description'])
                       if item['description'] != item['title'] else '')
         if not summary_ko or summary_ko.strip() == title_ko.strip():
@@ -294,8 +309,9 @@ def main():
         if len(results) >= LIMIT:
             break
         link = item.get('source_url', '')
-        if link not in used and item.get('title_ko') and infer_region(item) in quotas:
-            results.append(dict(item, region=infer_region(item)))
+        if (link not in used and item.get('title_ko') and item.get('region') in quotas
+                and re.search(r'[가-힣]', item.get('title_ko', ''))):
+            results.append(dict(item))
             used.add(link)
     counts = {region: sum(x['region'] == region for x in results)
               for region in quotas}

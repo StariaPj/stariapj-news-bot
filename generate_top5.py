@@ -12,7 +12,7 @@ import requests
 
 OUTPUT = Path("public/top5.json")
 DAYS = 5
-LIMIT = 5
+LIMIT = 6
 
 SEARCHES = [
     "South Africa tourism travel safety",
@@ -23,8 +23,6 @@ SEARCHES = [
     "South Korea tourism travel",
     "Seoul Jeju tourism travel news",
     "Korea tourism travel safety flights",
-    "Africa Asia tourism flights",
-    "international tourism travel advisory",
 ]
 
 KEYWORDS = {
@@ -217,7 +215,7 @@ def main():
     previous = load_previous()
     results = []
     used = set()
-    quotas = {"ZA": 2, "KR": 2, "INT": 1}
+    quotas = {"ZA": 3, "KR": 3}
     # Translate candidates inside each regional pool, not after selecting only
     # a few. A translation failure must not eliminate an entire region.
     for region, count in quotas.items():
@@ -258,7 +256,7 @@ def main():
         if len(results) >= LIMIT:
             break
         link = item['source_url']
-        if link in used:
+        if link in used or item.get('region') not in quotas:
             continue
         title_ko = korean_title(item['title'])
         if not title_ko:
@@ -277,12 +275,13 @@ def main():
         if len(results) >= LIMIT:
             break
         link = item.get('source_url', '')
-        if link not in used and item.get('title_ko'):
+        if link not in used and item.get('title_ko') and infer_region(item) in quotas:
             results.append(dict(item, region=infer_region(item)))
             used.add(link)
     counts = {region: sum(x['region'] == region for x in results)
               for region in quotas}
     print('TOP 5 regional distribution:', counts)
+    results = [x for x in results if x['region'] in quotas]
     results.sort(key=lambda x: x['published_at'], reverse=True)
     OUTPUT.parent.mkdir(parents=True, exist_ok=True)
     OUTPUT.write_text(json.dumps({

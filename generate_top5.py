@@ -142,8 +142,9 @@ def fetch_candidates():
     items = []
     seen = set()
     for search in SEARCHES:
+        locale = '&hl=ko&gl=KR&ceid=KR:ko' if re.search(r'[가-힣]', search) else '&hl=en&gl=US&ceid=US:en'
         url = ('https://news.google.com/rss/search?q='
-               + quote(search + ' when:5d') + '&hl=en&gl=US&ceid=US:en')
+               + quote(search + ' when:5d') + locale)
         try:
             response = SESSION.get(url, timeout=25)
             response.raise_for_status()
@@ -229,6 +230,7 @@ def main():
     print('Candidates with descriptions:', len(candidates))
     print('Candidate regions:', {r: sum(x['region'] == r for x in candidates) for r in ('ZA','KR','INT')})
     previous = load_previous()
+    translation_failed = 0
     results = []
     used = set()
     quotas = {"ZA": 3, "KR": 3}
@@ -243,7 +245,8 @@ def main():
                 continue
             title_ko = korean_title(item['title'])
             if not title_ko:
-                continue
+                translation_failed += 1
+                title_ko = item['title']
             summary_ko = (translate_ko(item['description'])
                           if item['description'] != item['title'] else '')
             if not summary_ko or summary_ko.strip() == title_ko.strip():
@@ -275,7 +278,8 @@ def main():
             continue
         title_ko = korean_title(item['title'])
         if not title_ko:
-            continue
+            translation_failed += 1
+            title_ko = item['title']
         summary_ko = (translate_ko(item['description'])
                       if item['description'] != item['title'] else '')
         if not summary_ko or summary_ko.strip() == title_ko.strip():
@@ -296,6 +300,7 @@ def main():
     counts = {region: sum(x['region'] == region for x in results)
               for region in quotas}
     print('TOP 6 regional distribution:', counts)
+    print('Korean translation unavailable for:', translation_failed, 'candidate(s)')
     results = [x for x in results if x['region'] in quotas]
     results.sort(key=lambda x: x['published_at'], reverse=True)
     OUTPUT.parent.mkdir(parents=True, exist_ok=True)

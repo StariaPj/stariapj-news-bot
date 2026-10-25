@@ -1,7 +1,18 @@
 {
-  "updated_at": 1792921062.532861,
+  "updated_at": 1792956887.342063,
   "retention_hours": 48,
   "newsletters": [
+    {
+      "id": "2026-10-26_0431",
+      "title_en": "StariaPj Travel Newsletter",
+      "title_ko": "StariaPj 관광 소식지",
+      "published_at": 1792956679.0,
+      "received_at": 1792956885.575605,
+      "files": {
+        "en": "StariaPj_Daily_Report_2026-10-26_0431_KST_en.pdf",
+        "ko": "StariaPj_Daily_Report_2026-10-26_0431_KST_ko.pdf"
+      }
+    },
     {
       "id": "2026-10-25_1835",
       "title_en": "StariaPj Travel Newsletter",
